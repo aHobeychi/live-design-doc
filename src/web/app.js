@@ -15,6 +15,7 @@ let snap = null;
 let prevText = new Map(); // block id -> normalized text, for change flashes
 let pendingSelection = null;
 let historyView = null; // revision number when viewing history, else null
+let lastDocHtml = null; // last HTML committed to #doc, to skip no-op rebuilds
 
 // ---- dialog & toast ----------------------------------------------------------
 
@@ -224,7 +225,17 @@ function renderChrome(status, notes) {
 
 function renderDoc(blocks, notes) {
   const doc = $('#doc');
-  doc.innerHTML = blocks.map((b) => b.html).join('');
+  // Rebuilding #doc on every poll — even ones triggered by an unrelated
+  // note/progress/status event — tears down live DOM nodes and silently
+  // kills any in-progress text selection (the SSE reconnect right after
+  // page load is the classic case: it lands while the reviewer is still
+  // selecting the first paragraph). Skip the rebuild when the markup is
+  // unchanged so a selection survives no-op reloads.
+  const html = blocks.map((b) => b.html).join('');
+  if (html !== lastDocHtml) {
+    doc.innerHTML = html;
+    lastDocHtml = html;
+  }
 
   const changed = new Set(snap.lastChanged?.changed ?? []);
   const added = new Set(snap.lastChanged?.added ?? []);
@@ -233,13 +244,17 @@ function renderDoc(blocks, notes) {
     if (!el) continue;
     if (prevText.size > 0 && prevText.get(b.id) !== b.normalized) el.classList.add('flash');
     // Persistent gentle-diff badge: what the last push touched.
-    if (snap.status === 'review' && snap.revision > 1) {
-      if (changed.has(b.id)) el.dataset.revtag = 'edited';
-      else if (added.has(b.id)) el.dataset.revtag = 'new';
+    // (`dataset.revtag = ''` would still leave the attribute present and
+    // match the `[data-revtag]` CSS selector — must remove it outright.)
+    if (snap.status === 'review' && snap.revision > 1 && (changed.has(b.id) || added.has(b.id))) {
+      el.dataset.revtag = changed.has(b.id) ? 'edited' : 'new';
+    } else {
+      delete el.dataset.revtag;
     }
     const entry = snap.progress[b.id];
+    el.classList.toggle('done', !!entry);
+    el.querySelector('.evidence')?.remove();
     if (entry) {
-      el.classList.add('done');
       const ev = document.createElement('div');
       ev.className = 'evidence';
       setBodyWithRefs(ev, entry.did + (entry.files.length ? ' — ' + entry.files.map((f) => '@' + f).join(' ') : ''));
@@ -484,6 +499,7 @@ function backToLive() {
   historyView = null;
   document.body.classList.remove('history-mode');
   prevText = new Map(); // no change-flashes against a historical render
+  lastDocHtml = null; // #doc currently holds a historical revision's markup
   load().catch(oops);
 }
 
