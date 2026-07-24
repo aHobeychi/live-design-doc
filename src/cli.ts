@@ -2,7 +2,7 @@
 import { fail } from './commands/api.js';
 import { start } from './commands/start.js';
 import { wait } from './commands/wait.js';
-import { ask, progress, push, stop } from './commands/misc.js';
+import { ask, progress, push, stop, verify } from './commands/misc.js';
 import { init } from './commands/init.js';
 import { maybeFirstRunSetup } from './commands/setup.js';
 
@@ -13,7 +13,9 @@ usage:
   livedoc ask <questions.json>          post clarifying questions (before first draft only)
   livedoc wait [--timeout <sec>]        block until feedback/approval/answers or timeout
   livedoc push                          reload the plan file as a new revision
-  livedoc progress <block-id> [done]    tick off a block of the approved plan
+  livedoc progress <block-id> [done] --did "…" [--files a.ts,b.ts]
+                                        tick a task with evidence of what was done
+  livedoc verify                        plan-vs-reality check; exits 1 if tasks are unticked
   livedoc stop                          shut the daemon down
   livedoc init [--agent claude|copilot|codex] [--scope project|personal]
                                         install the agent skill
@@ -35,6 +37,8 @@ async function main(): Promise<void> {
       return push();
     case 'progress':
       return progress(rest);
+    case 'verify':
+      return verify();
     case 'stop':
       return stop();
     case 'init':

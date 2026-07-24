@@ -26,6 +26,15 @@ test('regression: literal digits are not confused with code-span placeholders', 
   assert.equal(renderInline('allow 100 req/min via `limiter`'), 'allow 100 req/min via <code>limiter</code>');
 });
 
+test('@file references render as preview chips; emails and code spans do not', () => {
+  assert.equal(
+    renderInline('see @src/doc/anchor.ts for tiers'),
+    'see <span class="fileref" data-path="src/doc/anchor.ts">@src/doc/anchor.ts</span> for tiers'
+  );
+  assert.equal(renderInline('mail user@example.com please'), 'mail user@example.com please');
+  assert.equal(renderInline('run `livedoc ask @q.json` now'), 'run <code>livedoc ask @q.json</code> now');
+});
+
 test('unsafe link schemes are stripped', () => {
   const out = renderInline('[click](javascript:alert(1))');
   assert.ok(out.includes('href="#"'), out);

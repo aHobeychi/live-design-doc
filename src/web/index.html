@@ -431,6 +431,81 @@
   .hist-rev .meta { color: var(--chrome); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
   #banner button.linkish { margin-left: 10px; color: inherit; }
   body.history-mode #doc { opacity: 0.92; }
+  /* ---- gentle diff: blocks the last push touched ---- */
+  .block[data-revtag] { position: relative; box-shadow: inset 2px 0 0 var(--warn); }
+  .block[data-revtag="new"] { box-shadow: inset 2px 0 0 var(--accent); }
+  .block[data-revtag]::after {
+    content: attr(data-revtag);
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    font-family: var(--mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--warn);
+    opacity: 0.8;
+  }
+  .block[data-revtag="new"]::after { color: var(--accent); }
+  .note .compare { display: block; margin-top: 6px; font-size: 10px; }
+  .beforeafter .ba-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--chrome);
+    font-family: var(--mono);
+    margin: 10px 0 4px;
+  }
+  .beforeafter .ba-text {
+    font-family: var(--serif);
+    font-size: 14.5px;
+    line-height: 1.5;
+    border-left: 2px solid var(--hairline);
+    padding: 4px 10px;
+    white-space: pre-wrap;
+  }
+  .beforeafter .ba-text.after { border-left-color: var(--accent); background: #eef5f0; }
+  /* ---- build evidence under ticked tasks ---- */
+  .evidence {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--chrome);
+    margin-top: 3px;
+    line-height: 1.6;
+  }
+  .evidence::before { content: "└ "; color: var(--accent); }
+  /* ---- @file hover preview ---- */
+  #preview {
+    position: fixed;
+    z-index: 50;
+    width: min(480px, calc(100vw - 48px));
+    max-height: 300px;
+    overflow: hidden;
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    box-shadow: 0 6px 18px rgba(20, 20, 18, 0.16);
+    pointer-events: none;
+  }
+  #preview .pv-head {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--chrome);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  #preview pre {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    max-height: 260px;
+    overflow: hidden;
+    white-space: pre;
+  }
+  .fileref { cursor: help; }
   /* ---- @file mention autocomplete ---- */
   #mention {
     position: fixed;
@@ -530,6 +605,7 @@
   </dialog>
   <div id="toast" hidden></div>
   <div id="mention" hidden></div>
+  <div id="preview" hidden></div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

@@ -137,9 +137,21 @@ test('reload re-anchors: kept id but reworded → exact via quote in same block'
   );
   const r = await req<{ revision: number }>('POST', '/api/reload');
   assert.equal(r.revision, 2);
-  const doc = await req<{ notes: Note[] }>('GET', '/api/doc');
+  const doc = await req<{ notes: Note[]; lastChanged: { changed: string[]; added: string[] } }>(
+    'GET',
+    '/api/doc'
+  );
   assert.equal(doc.notes[0].resolved.fidelity, 'exact');
   assert.equal(doc.notes[0].resolved.blockId, 'p-scope');
+  // The gentle diff: exactly the reworded block is flagged, nothing else.
+  assert.deepEqual(doc.lastChanged, { changed: ['p-scope'], added: [] });
+});
+
+test('file preview serves project files and refuses traversal', async () => {
+  const f = await req<{ content: string; lines: number }>('GET', '/api/file?path=PLAN.md');
+  assert.ok(f.content.includes('# Rate limiter plan'));
+  await assert.rejects(req('GET', '/api/file?path=../../etc/passwd'), /outside project/);
+  await assert.rejects(req('GET', '/api/file?path=nope.md'), /cannot read/);
 });
 
 test('intents order the feedback batch blockers-first; suggestions ride along', async () => {
@@ -213,13 +225,31 @@ test('approve freezes the plan with notes appended and wakes the agent', async (
   assert.equal(woke.status, 'approved');
 });
 
-test('progress ticks blocks; all boxes done → status done', async () => {
-  await req('POST', '/api/progress', { blockId: 't-limiter' });
+test('progress requires evidence; verify tracks plan-vs-reality to done', async () => {
+  // A tick without evidence is refused — a checkbox is not a claim.
+  await assert.rejects(req('POST', '/api/progress', { blockId: 't-limiter' }), /evidence required/);
+
+  await req('POST', '/api/progress', {
+    blockId: 't-limiter',
+    did: 'Added RateLimiter with sliding window',
+    files: ['src/limiter.ts', 'test/limiter.test.ts'],
+  });
   let doc = await req<{ status: string }>('GET', '/api/doc');
   assert.equal(doc.status, 'executing');
-  await req('POST', '/api/progress', { blockId: 't-wire' });
+
+  const mid = await req<{ complete: boolean; undone: string[]; tasks: { id: string; did?: string }[] }>(
+    'GET',
+    '/api/verify'
+  );
+  assert.equal(mid.complete, false);
+  assert.deepEqual(mid.undone, ['t-wire']);
+  assert.equal(mid.tasks.find((t) => t.id === 't-limiter')?.did, 'Added RateLimiter with sliding window');
+
+  await req('POST', '/api/progress', { blockId: 't-wire', did: 'Wired into search route' });
   doc = await req<{ status: string }>('GET', '/api/doc');
   assert.equal(doc.status, 'done');
+  const end = await req<{ complete: boolean }>('GET', '/api/verify');
+  assert.equal(end.complete, true);
 });
 
 test('shutdown stops the daemon', async () => {

@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, statSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import { listProjectFiles } from './files.js';
 import { randomUUID } from 'node:crypto';
-import type { Answer, Block, Note, NoteIntent, Question, Status } from '../types.js';
+import type { Answer, Block, Note, NoteIntent, ProgressEntry, Question, Status } from '../types.js';
 import { INTENT_PRIORITY, NOTE_INTENTS, validateQuestions } from '../types.js';
 import { normalize } from '../doc/blocks.js';
 import { parseDocument } from '../doc/ids.js';
@@ -21,7 +21,9 @@ export interface DaemonState {
   notes: Note[];
   answersFile: AnswersFile | null;
   questions: Question[] | null;
-  progress: Record<string, 'done'>;
+  progress: Record<string, ProgressEntry>;
+  /** Block ids the last push edited or introduced — the gentle diff. */
+  lastChanged: { changed: string[]; added: string[] };
 }
 
 export interface Ctx {
@@ -86,6 +88,7 @@ function snapshot(state: DaemonState) {
     questions: state.questions,
     answers: state.answersFile?.answers ?? [],
     progress: state.progress,
+    lastChanged: state.lastChanged,
   };
 }
 
@@ -138,7 +141,15 @@ export function createDaemonServer(ctx: Ctx): Server {
     setStatus(ctx, 'review');
     state.questions = null;
     state.revision += 1;
+    const before = new Map(state.blocks.map((b) => [b.id, b.normalized]));
     rebuild(ctx, content);
+    // The gentle diff: which blocks this push edited or introduced. No
+    // per-word diffing (PRD non-goal) — just "the agent touched this".
+    state.lastChanged = { changed: [], added: [] };
+    for (const b of state.blocks) {
+      if (!before.has(b.id)) state.lastChanged.added.push(b.id);
+      else if (before.get(b.id) !== b.normalized) state.lastChanged.changed.push(b.id);
+    }
     store.saveRevision(state.revision, content);
     store.saveComments(state.notes);
     bus.broadcast('revision', { revision: state.revision });
@@ -305,14 +316,67 @@ export function createDaemonServer(ctx: Ctx): Server {
       if (state.status !== 'executing') {
         throw new HttpError(409, `progress requires an approved plan (status is "${state.status}")`);
       }
-      if (done) state.progress[blockId] = 'done';
-      else delete state.progress[blockId];
+      if (done) {
+        // A tick is an auditable claim, not a checkbox: evidence is required.
+        const did = String(body.did ?? '').trim();
+        if (!did) {
+          throw new HttpError(400, 'evidence required: pass --did "what you actually did" (and --files touched,paths)');
+        }
+        const files = Array.isArray(body.files) ? body.files.map(String).filter(Boolean) : [];
+        state.progress[blockId] = { state: 'done', did, files, at: new Date().toISOString() };
+      } else {
+        delete state.progress[blockId];
+      }
       const boxes = state.blocks.filter((b) => b.checkbox);
-      if (boxes.length > 0 && boxes.every((b) => state.progress[b.id] === 'done')) {
+      if (boxes.length > 0 && boxes.every((b) => state.progress[b.id])) {
         setStatus(ctx, 'done');
       }
       bus.broadcast('progress', { blockId, done });
       json(res, 200, { status: 'ok', progress: state.progress });
+    },
+
+    // Plan-vs-reality: every task block with its tick and evidence. The
+    // agent runs `livedoc verify` before calling the build finished.
+    'GET /api/verify': (_req, res) => {
+      const tasks = state.blocks
+        .filter((b) => b.checkbox)
+        .map((b) => ({
+          id: b.id,
+          text: b.text,
+          done: Boolean(state.progress[b.id]) || b.checkbox === 'done',
+          ...(state.progress[b.id] ?? {}),
+        }));
+      const undone = tasks.filter((t) => !t.done).map((t) => t.id);
+      json(res, 200, {
+        complete: tasks.length > 0 && undone.length === 0,
+        total: tasks.length,
+        undone,
+        tasks,
+      });
+    },
+
+    // Read-only peek at a project file for @-reference previews. Path must
+    // resolve inside the project root — traversal is refused.
+    'GET /api/file': (_req, res, url) => {
+      const rel = url.searchParams.get('path') ?? '';
+      const root = resolve(dirname(store.dir));
+      const full = resolve(root, rel);
+      if (!rel || !full.startsWith(root + sep)) throw new HttpError(400, 'path outside project');
+      let content: string;
+      try {
+        if (statSync(full).size > 512_000) throw new Error('too large');
+        content = readFileSync(full, 'utf8');
+      } catch {
+        throw new HttpError(404, `cannot read ${rel}`);
+      }
+      const lines = content.split('\n');
+      const MAX = 160;
+      json(res, 200, {
+        path: rel,
+        content: lines.slice(0, MAX).join('\n'),
+        truncated: lines.length > MAX,
+        lines: lines.length,
+      });
     },
 
     'POST /api/questions': async (req, res) => {

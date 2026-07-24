@@ -88,6 +88,14 @@ export interface Answer {
   value: string | string[];
 }
 
+/** Evidence attached when a task block is ticked: what was actually done. */
+export interface ProgressEntry {
+  state: 'done';
+  did: string;
+  files: string[];
+  at: string;
+}
+
 export type WaitResult =
   | { status: 'timeout' }
   | { status: 'feedback'; revision: number; notes: Note[] }

@@ -66,6 +66,7 @@ async function main(): Promise<void> {
     answersFile: store.loadAnswers(),
     questions: null,
     progress: {},
+    lastChanged: { changed: [], added: [] },
   };
 
   const bus = new Bus();

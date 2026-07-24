@@ -29,6 +29,12 @@ export function renderInline(md: string): string {
   s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
   s = s.replace(/(^|[\s(])_([^_\s][^_]*)_/g, '$1<em>$2</em>');
+  // @file references become preview chips. The boundary excludes word chars
+  // so emails (user@host) stay plain text; code spans are already extracted.
+  s = s.replace(
+    /(^|[\s(])@([\w./-]*[\w/])/g,
+    '$1<span class="fileref" data-path="$2">@$2</span>'
+  );
   s = s.replace(/\u0000(\d+)\u0000/g, (_, i: string) => codeSpans[Number(i)]);
   return s;
 }

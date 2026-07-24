@@ -34,6 +34,19 @@ $('#dialog').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) e.currentTarget.close('cancel'); // backdrop click
 });
 
+/** Modal with only a Close button; `build` fills the body element. */
+function infoDialog(title, build) {
+  const dlg = $('#dialog');
+  $('#dialog-title').textContent = title;
+  const body = $('#dialog-body');
+  body.textContent = '';
+  build(body);
+  $('#dialog-ok').textContent = 'Close';
+  $('#dialog-cancel').hidden = true;
+  dlg.showModal();
+  dlg.addEventListener('close', () => ($('#dialog-cancel').hidden = false), { once: true });
+}
+
 let toastTimer = null;
 function toast(message, kind = 'error') {
   const el = $('#toast');
@@ -141,6 +154,7 @@ function setBodyWithRefs(el, text) {
     el.append(text.slice(last, m.index));
     const chip = document.createElement('code');
     chip.className = 'fileref';
+    chip.dataset.path = m[0].slice(1);
     chip.textContent = m[0];
     el.append(chip);
     last = m.index + m[0].length;
@@ -202,7 +216,7 @@ function renderChrome(status, notes) {
   } else banner.hidden = true;
 
   const boxes = snap.blocks.filter((b) => b.checkbox);
-  const doneCount = boxes.filter((b) => snap.progress[b.id] === 'done' || b.checkbox === 'done').length;
+  const doneCount = boxes.filter((b) => snap.progress[b.id] || b.checkbox === 'done').length;
   const pc = $('#progress-count');
   pc.hidden = !['executing', 'done'].includes(status) || boxes.length === 0;
   pc.textContent = `${doneCount}/${boxes.length} done`;
@@ -212,11 +226,25 @@ function renderDoc(blocks, notes) {
   const doc = $('#doc');
   doc.innerHTML = blocks.map((b) => b.html).join('');
 
+  const changed = new Set(snap.lastChanged?.changed ?? []);
+  const added = new Set(snap.lastChanged?.added ?? []);
   for (const b of blocks) {
     const el = doc.querySelector(`[data-id="${CSS.escape(b.id)}"]`);
     if (!el) continue;
     if (prevText.size > 0 && prevText.get(b.id) !== b.normalized) el.classList.add('flash');
-    if (snap.progress[b.id] === 'done') el.classList.add('done');
+    // Persistent gentle-diff badge: what the last push touched.
+    if (snap.status === 'review' && snap.revision > 1) {
+      if (changed.has(b.id)) el.dataset.revtag = 'edited';
+      else if (added.has(b.id)) el.dataset.revtag = 'new';
+    }
+    const entry = snap.progress[b.id];
+    if (entry) {
+      el.classList.add('done');
+      const ev = document.createElement('div');
+      ev.className = 'evidence';
+      setBodyWithRefs(ev, entry.did + (entry.files.length ? ' — ' + entry.files.map((f) => '@' + f).join(' ') : ''));
+      (el.querySelector('.li-body') ?? el).appendChild(ev);
+    }
   }
   prevText = new Map(blocks.map((b) => [b.id, b.normalized]));
 
@@ -313,6 +341,34 @@ function renderNotes(notes) {
       s.innerHTML = '<span class="label">suggested wording</span>';
       s.append(n.suggestion);
       el.appendChild(s);
+    }
+    // "Did my note land?" — before/after of just this note's block.
+    const currentBlock = snap.blocks.find((b) => b.id === n.resolved.blockId);
+    if (
+      n.state === 'sent' &&
+      !historyView &&
+      currentBlock &&
+      currentBlock.text.trim() !== n.blockTextAtCreation.trim()
+    ) {
+      const cmp = document.createElement('button');
+      cmp.className = 'linkish compare';
+      cmp.textContent = 'view change';
+      cmp.onclick = () =>
+        infoDialog('What changed here', (body) => {
+          body.className = 'beforeafter';
+          const mk = (label, text, cls) => {
+            const l = document.createElement('div');
+            l.className = 'ba-label';
+            l.textContent = label;
+            const t = document.createElement('div');
+            t.className = 'ba-text ' + cls;
+            t.textContent = text;
+            body.append(l, t);
+          };
+          mk(`when you wrote this note (rev ${n.createdAgainstRevision})`, n.blockTextAtCreation, 'before');
+          mk(`now (rev ${snap.revision})`, currentBlock.text, 'after');
+        });
+      el.appendChild(cmp);
     }
     if (n.state === 'new' && !historyView) {
       el.querySelector('.del').onclick = () =>
@@ -600,6 +656,49 @@ $('#composer-text').addEventListener('keydown', (e) => {
 });
 attachMentions($('#composer-text'));
 attachMentions($('#composer-suggestion'));
+
+// ---- @file hover previews ----------------------------------------------------
+
+const previewCache = new Map();
+let previewTimer = null;
+
+document.addEventListener('mouseover', (e) => {
+  const ref = e.target.closest?.('.fileref[data-path]');
+  if (!ref) return;
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const path = ref.dataset.path;
+    let data = previewCache.get(path);
+    if (data === undefined) {
+      data = await api('GET', `/api/file?path=${encodeURIComponent(path)}`).catch(() => null);
+      previewCache.set(path, data);
+    }
+    const pv = $('#preview');
+    pv.textContent = '';
+    const head = document.createElement('div');
+    head.className = 'pv-head';
+    head.textContent = data
+      ? path + (data.truncated ? ` — first 160 of ${data.lines} lines` : '')
+      : `${path} — not found in project`;
+    pv.appendChild(head);
+    if (data) {
+      const pre = document.createElement('pre');
+      pre.textContent = data.content;
+      pv.appendChild(pre);
+    }
+    const r = ref.getBoundingClientRect();
+    pv.hidden = false;
+    const below = r.bottom + 8 + pv.offsetHeight < window.innerHeight;
+    pv.style.top = (below ? r.bottom + 8 : Math.max(8, r.top - pv.offsetHeight - 8)) + 'px';
+    pv.style.left = Math.min(r.left, window.innerWidth - pv.offsetWidth - 24) + 'px';
+  }, 220);
+});
+document.addEventListener('mouseout', (e) => {
+  if (e.target.closest?.('.fileref[data-path]')) {
+    clearTimeout(previewTimer);
+    $('#preview').hidden = true;
+  }
+});
 
 // ---- send & approve ---------------------------------------------------------
 

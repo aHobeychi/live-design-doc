@@ -68,11 +68,21 @@ Every command prints one line of JSON on stdout. Parse that; ignore stderr.
    - Non-zero exit — the daemon died. Run `livedoc start PLAN.md` and wait again.
 
 5. **Build from the approved file** at `approvedPath` — that file, not your memory of
-   the conversation, is the contract. As you complete each task block:
+   the conversation, is the contract. As you complete each task block, tick it **with
+   evidence of what you actually did** (the tick is refused without it):
 
    ```bash
-   livedoc progress t-limiter done
+   livedoc progress t-limiter done --did "Added RateLimiter with sliding window" --files src/limiter.ts,test/limiter.test.ts
    ```
+
+   Before declaring the build finished, run:
+
+   ```bash
+   livedoc verify
+   ```
+
+   It lists every task with its evidence and exits non-zero while any task is unticked.
+   Do not report the build complete while `verify` fails.
 
    If mid-build you find the approved plan is wrong — a dependency that doesn't exist,
    an assumption that doesn't hold — **stop building**, revise PLAN.md, `livedoc push`,
@@ -86,3 +96,6 @@ Every command prints one line of JSON on stdout. Parse that; ignore stderr.
 - Task lists: one item per line, each with a checkbox and an id —
   `- [ ] Add RateLimiter {#t-limiter}` — these are what you tick with `progress`.
 - Keep the plan skimmable: a human reads all of it every revision.
+- Cite evidence in the plan itself: when a claim rests on existing code, reference the
+  file as `@relative/path` — the reviewer can preview it inline, which kills "are you
+  sure that exists?" round-trips. Only reference paths that actually exist.
