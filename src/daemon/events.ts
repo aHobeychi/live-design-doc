@@ -10,7 +10,7 @@ import type { AgentEvent, WaitResult } from '../types.js';
  */
 export class Bus {
   private sseClients = new Set<ServerResponse>();
-  private waiter: ((e: WaitResult) => void) | null = null;
+  private waiter: { take: (e: WaitResult) => void; timer: NodeJS.Timeout } | null = null;
   private pending: AgentEvent[] = [];
   private heartbeat: NodeJS.Timeout;
 
@@ -42,7 +42,8 @@ export class Bus {
     if (this.waiter) {
       const w = this.waiter;
       this.waiter = null;
-      w(event);
+      clearTimeout(w.timer);
+      w.take(event);
     } else {
       this.pending.push(event);
       this.onPendingChange?.(this.pending);
@@ -65,24 +66,30 @@ export class Bus {
     if (this.waiter) {
       const stale = this.waiter;
       this.waiter = null;
-      queueMicrotask(() => stale({ status: 'timeout' }));
+      clearTimeout(stale.timer);
+      queueMicrotask(() => stale.take({ status: 'timeout' }));
     }
     return new Promise<WaitResult>((resolve) => {
+      const take = (e: WaitResult) => resolve(e);
+      // No unref: a pending wait is real work that must keep the event loop
+      // alive, or the promise dies unresolved when the process drains. The
+      // timer is cleared on every path that retires this waiter.
       const timer = setTimeout(() => {
-        if (this.waiter === take) this.waiter = null;
+        if (this.waiter?.take === take) this.waiter = null;
         resolve({ status: 'timeout' });
       }, Math.max(1, timeoutSec) * 1000);
-      timer.unref();
-      const take = (e: WaitResult) => {
-        clearTimeout(timer);
-        resolve(e);
-      };
-      this.waiter = take;
+      this.waiter = { take, timer };
     });
   }
 
   close(): void {
     clearInterval(this.heartbeat);
+    if (this.waiter) {
+      const w = this.waiter;
+      this.waiter = null;
+      clearTimeout(w.timer);
+      w.take({ status: 'shutdown' });
+    }
     for (const res of this.sseClients) res.end();
     this.sseClients.clear();
   }

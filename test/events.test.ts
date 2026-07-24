@@ -68,6 +68,15 @@ test('onPendingChange fires on queue growth and drain — the persistence hook',
   bus.close();
 });
 
+test('close() releases a pending waiter as shutdown and disarms its timer', async () => {
+  const bus = new Bus();
+  // 600s timeout: if close() leaked the timer, this file would pin the
+  // process for 10 minutes — the CI failure mode this guards against.
+  const waiting = bus.wait(600);
+  bus.close();
+  assert.deepEqual(await waiting, { status: 'shutdown' });
+});
+
 test('seedPending restores a persisted queue without re-notifying', async () => {
   const bus = new Bus();
   const sizes: number[] = [];
