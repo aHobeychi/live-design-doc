@@ -142,10 +142,65 @@ test('reload re-anchors: kept id but reworded → exact via quote in same block'
   assert.equal(doc.notes[0].resolved.blockId, 'p-scope');
 });
 
-test('comments.json survives on disk with the sent note', () => {
+test('intents order the feedback batch blockers-first; suggestions ride along', async () => {
+  await req('POST', '/api/comments', {
+    blockId: 't-wire',
+    quote: 'Wire into',
+    body: 'style nit on naming',
+    intent: 'nit',
+  });
+  await req('POST', '/api/comments', {
+    blockId: 't-limiter',
+    quote: 'RateLimiter class',
+    body: 'wrong store entirely',
+    intent: 'blocker',
+    suggestion: 'Add RateLimiter backed by Memcached',
+  });
+  const bad = await req<Note>('POST', '/api/comments', {
+    blockId: 't-wire',
+    quote: 'Wire',
+    body: 'x',
+    intent: 'not-a-real-intent',
+  });
+  assert.equal(bad.intent, 'change'); // unknown intents degrade to the default
+  await req('DELETE', `/api/comments/${bad.id}`);
+
+  await req('POST', '/api/send');
+  const result = await req<WaitResult>('GET', '/api/wait?timeout=5');
+  assert.equal(result.status, 'feedback');
+  const notes = (result as { notes: Note[] }).notes;
+  assert.deepEqual(
+    notes.map((n) => n.intent),
+    ['blocker', 'nit']
+  );
+  assert.equal(notes[0].suggestion, 'Add RateLimiter backed by Memcached');
+});
+
+test('history lists every revision with its notes; old revisions render read-only', async () => {
+  const h = await req<{
+    current: number;
+    revisions: { revision: number; current: boolean; notes: { body: string }[] }[];
+  }>('GET', '/api/history');
+  assert.equal(h.current, 2);
+  assert.deepEqual(h.revisions.map((r) => r.revision), [1, 2]);
+  const rev2 = h.revisions.find((r) => r.revision === 2)!;
+  assert.ok(rev2.current);
+  assert.ok(rev2.notes.some((n) => n.body === 'wrong store entirely'));
+
+  const old = await req<{ revision: number; blocks: { id: string; text: string }[] }>(
+    'GET',
+    '/api/revision?n=1'
+  );
+  // Revision 1 predates the rewording that produced revision 2.
+  const scope = old.blocks.find((b) => b.id === 'p-scope')!;
+  assert.ok(scope.text.includes('covers 100 req/min per key'));
+  await assert.rejects(req('GET', '/api/revision?n=99'), /no revision/);
+});
+
+test('comments.json survives on disk with every sent note', () => {
   const file = JSON.parse(readFileSync(join(dir, '.livedoc', 'comments.json'), 'utf8'));
-  assert.equal(file.notes.length, 1);
-  assert.equal(file.notes[0].state, 'sent');
+  assert.equal(file.notes.length, 3);
+  assert.ok(file.notes.every((n: Note) => n.state === 'sent'));
 });
 
 test('approve freezes the plan with notes appended and wakes the agent', async () => {

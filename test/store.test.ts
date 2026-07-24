@@ -16,6 +16,7 @@ function tempStore(): { store: Store; dir: string; cleanup: () => void } {
 const NOTE: Note = {
   id: 'n-1',
   state: 'sent',
+  intent: 'change',
   body: 'b',
   quote: 'q',
   contextBefore: '',

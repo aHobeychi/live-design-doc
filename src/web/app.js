@@ -14,6 +14,7 @@ const api = async (method, path, body) => {
 let snap = null;
 let prevText = new Map(); // block id -> normalized text, for change flashes
 let pendingSelection = null;
+let historyView = null; // revision number when viewing history, else null
 
 // ---- dialog & toast ----------------------------------------------------------
 
@@ -161,6 +162,7 @@ function scheduleLoad() {
 }
 
 function render() {
+  if (historyView !== null) return; // frozen on a past revision; Back reloads
   const { status, revision, blocks, notes, questions } = snap;
   $('#file').textContent = snap.file.split('/').pop();
   $('#rev').textContent = revision > 0 ? `rev ${String(revision).padStart(3, '0')}` : '';
@@ -289,13 +291,15 @@ function renderNotes(notes) {
     const el = document.createElement('div');
     el.className = 'note';
     el.dataset.state = n.state;
-    el.dataset.target = n.resolved.blockId || '';
+    // In history mode the original anchor is the truth for that revision.
+    el.dataset.target = (historyView !== null ? n.blockId : n.resolved.blockId) || '';
     const badge =
-      n.resolved.fidelity === 'moved' ? '<span class="badge moved">moved</span>' :
-      n.resolved.fidelity === 'approximate' ? '<span class="badge approximate">moved?</span>' :
-      n.resolved.fidelity === 'orphan' ? '<span class="badge orphan">text is gone</span>' : '';
+      `<span class="badge intent-${n.intent}">${n.intent}</span>` +
+      (n.resolved.fidelity === 'moved' ? '<span class="badge moved">moved</span>' :
+       n.resolved.fidelity === 'approximate' ? '<span class="badge approximate">moved?</span>' :
+       n.resolved.fidelity === 'orphan' ? '<span class="badge orphan">text is gone</span>' : '');
     el.innerHTML =
-      (n.state === 'new'
+      (n.state === 'new' && !historyView
         ? '<button class="del" title="Delete unsent note">×</button>' +
           '<button class="edit" title="Edit unsent note">✎</button>'
         : '') +
@@ -303,14 +307,21 @@ function renderNotes(notes) {
       `<span class="quote"></span><span class="body"></span>`;
     el.querySelector('.quote').textContent = `“${n.quote}”`;
     setBodyWithRefs(el.querySelector('.body'), n.body);
-    if (n.state === 'new') {
+    if (n.suggestion) {
+      const s = document.createElement('div');
+      s.className = 'suggestion';
+      s.innerHTML = '<span class="label">suggested wording</span>';
+      s.append(n.suggestion);
+      el.appendChild(s);
+    }
+    if (n.state === 'new' && !historyView) {
       el.querySelector('.del').onclick = () =>
         api('DELETE', `/api/comments/${n.id}`).then(load).catch(oops);
       el.querySelector('.edit').onclick = () => startEdit(el, n);
       el.querySelector('.body').ondblclick = () => startEdit(el, n);
     }
-    el.onmouseenter = () => highlight(n.resolved.blockId, true);
-    el.onmouseleave = () => highlight(n.resolved.blockId, false);
+    el.onmouseenter = () => highlight(el.dataset.target, true);
+    el.onmouseleave = () => highlight(el.dataset.target, false);
     box.appendChild(el);
   }
   requestAnimationFrame(layoutMargin);
@@ -319,9 +330,14 @@ function renderNotes(notes) {
 function startEdit(el, n) {
   if (el.querySelector('textarea')) return;
   const body = el.querySelector('.body');
+  el.querySelector('.suggestion')?.remove();
   const ta = document.createElement('textarea');
   ta.className = 'edit-ta';
   ta.value = n.body;
+  const sa = document.createElement('textarea');
+  sa.className = 'edit-ta';
+  sa.placeholder = 'Suggested wording (optional)';
+  sa.value = n.suggestion ?? '';
   const row = document.createElement('div');
   row.className = 'edit-row';
   const save = document.createElement('button');
@@ -331,18 +347,22 @@ function startEdit(el, n) {
   cancel.textContent = 'Cancel';
   const commit = () => {
     const text = ta.value.trim();
-    if (!text || text === n.body) return load();
-    api('PATCH', `/api/comments/${n.id}`, { body: text }).then(load).catch(oops);
+    if (!text) return load();
+    api('PATCH', `/api/comments/${n.id}`, { body: text, suggestion: sa.value.trim() })
+      .then(load)
+      .catch(oops);
   };
   save.onclick = commit;
   cancel.onclick = () => load();
-  ta.onkeydown = (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') commit();
-    if (e.key === 'Escape') load();
-  };
+  for (const t of [ta, sa]) {
+    t.onkeydown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') commit();
+      if (e.key === 'Escape') load();
+    };
+    attachMentions(t);
+  }
   row.append(cancel, save);
-  body.replaceWith(ta, row);
-  attachMentions(ta);
+  body.replaceWith(ta, sa, row);
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
   requestAnimationFrame(layoutMargin);
@@ -354,7 +374,62 @@ function highlight(blockId, on) {
   if (el) el.classList.toggle('note-target', on);
 }
 
-// ---- clarify phase ----------------------------------------------------------
+// ---- history ----------------------------------------------------------------
+
+$('#history-btn').onclick = async () => {
+  const panel = $('#history-panel');
+  if (!panel.hidden) return void (panel.hidden = true);
+  const { revisions } = await api('GET', '/api/history').catch(() => ({ revisions: [] }));
+  panel.innerHTML = '';
+  for (const r of [...revisions].reverse()) {
+    const b = document.createElement('button');
+    b.className = 'hist-rev';
+    const label = document.createElement('div');
+    label.textContent = `rev ${String(r.revision).padStart(3, '0')}`;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent =
+      (r.current ? 'current · ' : '') +
+      (r.notes.length ? `${r.notes.length} note${r.notes.length > 1 ? 's' : ''}` : 'no notes');
+    b.append(label, meta);
+    b.onclick = () => {
+      panel.hidden = true;
+      if (r.current) backToLive();
+      else openRevision(r.revision);
+    };
+    panel.appendChild(b);
+  }
+  panel.hidden = revisions.length === 0;
+};
+
+async function openRevision(n) {
+  const { blocks } = await api('GET', `/api/revision?n=${n}`).catch((e) => (oops(e), { blocks: null }));
+  if (!blocks) return;
+  historyView = n;
+  document.body.classList.add('history-mode');
+  $('#clarify').hidden = true;
+  $('#waiting').hidden = true;
+  $('#layout').hidden = false;
+  $('#doc').innerHTML = blocks.map((b) => b.html).join('');
+  $('#rev').textContent = `rev ${String(n).padStart(3, '0')}`;
+  renderToc(blocks);
+  renderNotes(snap.notes.filter((x) => x.createdAgainstRevision === n));
+  const banner = $('#banner');
+  banner.hidden = false;
+  banner.textContent = `Viewing revision ${n} — read-only. `;
+  const back = document.createElement('button');
+  back.className = 'linkish';
+  back.textContent = 'back to live';
+  back.onclick = backToLive;
+  banner.appendChild(back);
+}
+
+function backToLive() {
+  historyView = null;
+  document.body.classList.remove('history-mode');
+  prevText = new Map(); // no change-flashes against a historical render
+  load().catch(oops);
+}
 
 function renderClarify(questions) {
   const root = $('#clarify');
@@ -437,6 +512,7 @@ document.addEventListener('keyup', (e) => {
 
 function maybeShowAddNote() {
   const btn = $('#addnote');
+  if (historyView !== null) return void (btn.hidden = true); // past revisions are read-only
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.toString().trim()) {
     btn.hidden = true;
@@ -475,11 +551,33 @@ function maybeShowAddNote() {
   btn.hidden = false;
 }
 
+let composerIntent = 'change';
+for (const chip of document.querySelectorAll('#composer-intent .intent-chip')) {
+  chip.onclick = () => {
+    composerIntent = chip.dataset.intent;
+    for (const c of document.querySelectorAll('#composer-intent .intent-chip')) {
+      c.classList.toggle('active', c === chip);
+    }
+  };
+}
+
+$('#composer-suggest').onclick = () => {
+  const ta = $('#composer-suggestion');
+  ta.hidden = !ta.hidden;
+  if (!ta.hidden) {
+    if (!ta.value) ta.value = pendingSelection?.quote ?? '';
+    ta.focus();
+  }
+};
+
 $('#addnote').onclick = () => {
   if (!pendingSelection) return;
   $('#addnote').hidden = true;
   $('#composer-quote').textContent = `“${pendingSelection.quote}”`;
   $('#composer-text').value = '';
+  $('#composer-suggestion').value = '';
+  $('#composer-suggestion').hidden = true;
+  document.querySelector('#composer-intent [data-intent="change"]').click();
   $('#composer').hidden = false;
   $('#composer-text').focus();
 };
@@ -488,7 +586,8 @@ $('#composer-cancel').onclick = () => ($('#composer').hidden = true);
 $('#composer-save').onclick = () => {
   const body = $('#composer-text').value.trim();
   if (!body || !pendingSelection) return;
-  api('POST', '/api/comments', { ...pendingSelection, body })
+  const suggestion = $('#composer-suggestion').hidden ? '' : $('#composer-suggestion').value.trim();
+  api('POST', '/api/comments', { ...pendingSelection, body, intent: composerIntent, suggestion })
     .then(() => {
       $('#composer').hidden = true;
       window.getSelection()?.removeAllRanges();
@@ -500,6 +599,7 @@ $('#composer-text').addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') $('#composer-save').click();
 });
 attachMentions($('#composer-text'));
+attachMentions($('#composer-suggestion'));
 
 // ---- send & approve ---------------------------------------------------------
 

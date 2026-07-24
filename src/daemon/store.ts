@@ -64,7 +64,9 @@ export class Store {
   }
 
   loadComments(): Note[] {
-    return this.readJson<{ notes: Note[] }>('comments.json')?.notes ?? [];
+    const notes = this.readJson<{ notes: Note[] }>('comments.json')?.notes ?? [];
+    // Notes written before intents existed default to 'change'.
+    return notes.map((n) => ({ ...n, intent: n.intent ?? 'change' }));
   }
 
   saveAnswers(file: AnswersFile): void {
@@ -87,14 +89,28 @@ export class Store {
     this.atomicWrite(join('revisions', String(n).padStart(3, '0') + '.md'), markdown);
   }
 
-  /** Highest NNN already in revisions/, so restarts keep counting upward. */
-  maxRevision(): number {
+  /** Revision numbers present in revisions/, ascending. */
+  listRevisions(): number[] {
     try {
       return readdirSync(join(this.dir, 'revisions'))
-        .map((f) => Number(/^(\d{3})\.md$/.exec(f)?.[1] ?? 0))
-        .reduce((a, b) => Math.max(a, b), 0);
+        .map((f) => Number(/^(\d{3})\.md$/.exec(f)?.[1] ?? NaN))
+        .filter((n) => Number.isInteger(n) && n > 0)
+        .sort((a, b) => a - b);
     } catch {
-      return 0;
+      return [];
+    }
+  }
+
+  /** Highest NNN already in revisions/, so restarts keep counting upward. */
+  maxRevision(): number {
+    return this.listRevisions().at(-1) ?? 0;
+  }
+
+  loadRevision(n: number): string | null {
+    try {
+      return readFileSync(join(this.dir, 'revisions', String(n).padStart(3, '0') + '.md'), 'utf8');
+    } catch {
+      return null;
     }
   }
 

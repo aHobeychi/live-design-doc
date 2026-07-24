@@ -38,9 +38,26 @@ export interface Resolution {
   fidelity: Fidelity;
 }
 
+/** What the note is asking of the agent — drives ordering of the batch. */
+export type NoteIntent = 'blocker' | 'change' | 'question' | 'nit';
+
+export const NOTE_INTENTS: NoteIntent[] = ['blocker', 'change', 'question', 'nit'];
+
+/** Delivery order for feedback batches: blockers first, nits last. */
+export const INTENT_PRIORITY: Record<NoteIntent, number> = {
+  blocker: 0,
+  change: 1,
+  question: 2,
+  nit: 3,
+};
+
 export interface Note {
   id: string;
   state: 'new' | 'sent';
+  intent: NoteIntent;
+  /** Optional proposed wording for the quoted text — input, never an edit;
+   *  the agent decides whether to adopt it. */
+  suggestion?: string;
   body: string;
   quote: string;
   contextBefore: string;

@@ -57,6 +57,13 @@ Every command prints one line of JSON on stdout. Parse that; ignore stderr.
      A note may reference project files as `@relative/path` (e.g. `@src/daemon/store.ts`)
      — **read every referenced file before revising**; the human pointed at it for a
      reason.
+     Notes arrive ordered by `intent`: `blocker` (the plan is wrong here — resolve it or
+     the human won't approve), `change`, `question` (answer it in the document, usually
+     in the block it anchors to or Open questions), `nit` (batch these; don't let them
+     drive structure). Address blockers first.
+     A note may carry a `suggestion` — the human's proposed wording for the quoted text.
+     It is input, not an edit: adopt it, adapt it, or decline it, but if you decline,
+     say why in the document. You still own every word.
    - `{"status":"approved","approvedPath":"..."}` — the plan is frozen. Go to step 5.
    - Non-zero exit — the daemon died. Run `livedoc start PLAN.md` and wait again.
 

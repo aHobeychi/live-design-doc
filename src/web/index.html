@@ -355,6 +355,82 @@
   }
   #toast.error { background: var(--danger); }
   @keyframes toast-in { from { transform: translate(-50%, 8px); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
+  /* ---- intents & suggestions ---- */
+  :root { --info: #24589c; }
+  button.linkish {
+    border: none;
+    padding: 0;
+    color: var(--chrome);
+    background: none;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    font-size: inherit;
+  }
+  button.linkish:hover { color: var(--ink); }
+  .intent-row { display: flex; gap: 6px; margin-bottom: 10px; }
+  .intent-chip {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 9px;
+    border: 1px solid var(--hairline);
+    color: var(--chrome);
+    border-radius: 2px;
+  }
+  .intent-chip.active[data-intent="blocker"] { color: var(--danger); border-color: var(--danger); }
+  .intent-chip.active[data-intent="change"] { color: var(--accent); border-color: var(--accent); }
+  .intent-chip.active[data-intent="question"] { color: var(--info); border-color: var(--info); }
+  .intent-chip.active[data-intent="nit"] { color: var(--ink); border-color: var(--ink); }
+  .note .badge.intent-blocker { color: var(--danger); }
+  .note .badge.intent-change { color: var(--accent); }
+  .note .badge.intent-question { color: var(--info); }
+  .note .badge.intent-nit { color: var(--chrome); }
+  .note .suggestion {
+    margin-top: 6px;
+    border-left: 2px solid var(--accent);
+    background: #eef5f0;
+    padding: 5px 8px;
+    border-radius: 2px;
+  }
+  .note .suggestion .label {
+    display: block;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+  #composer .linkish { display: block; margin: 8px 0; font-size: 11px; }
+  #composer #composer-suggestion { height: 56px; }
+  /* ---- history ---- */
+  #history-panel {
+    position: fixed;
+    top: 37px;
+    right: 24px;
+    z-index: 25;
+    width: 300px;
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 12px;
+    box-shadow: 0 4px 14px rgba(20, 20, 18, 0.12);
+  }
+  .hist-rev {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    border-bottom: 1px solid var(--hairline);
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+  .hist-rev:hover { background: #f4f4f2; }
+  .hist-rev .meta { color: var(--chrome); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  #banner button.linkish { margin-left: 10px; color: inherit; }
+  body.history-mode #doc { opacity: 0.92; }
   /* ---- @file mention autocomplete ---- */
   #mention {
     position: fixed;
@@ -402,9 +478,11 @@
     <span id="file"></span>
     <span class="spacer"></span>
     <span id="progress-count" hidden></span>
+    <button id="history-btn" class="linkish">history</button>
     <span id="rev"></span>
     <span id="status-chip"></span>
   </header>
+  <div id="history-panel" hidden></div>
   <div id="banner" hidden></div>
   <main>
     <section id="clarify" hidden></section>
@@ -428,7 +506,15 @@
   <button id="addnote" hidden>Add note</button>
   <div id="composer" hidden>
     <blockquote id="composer-quote"></blockquote>
+    <div id="composer-intent" class="intent-row">
+      <button class="intent-chip" data-intent="blocker">blocker</button>
+      <button class="intent-chip active" data-intent="change">change</button>
+      <button class="intent-chip" data-intent="question">question</button>
+      <button class="intent-chip" data-intent="nit">nit</button>
+    </div>
     <textarea id="composer-text" placeholder="Your note…"></textarea>
+    <button id="composer-suggest" class="linkish">+ suggest wording</button>
+    <textarea id="composer-suggestion" hidden placeholder="Proposed wording for the quoted text…"></textarea>
     <div class="row">
       <button id="composer-cancel">Cancel</button>
       <button id="composer-save" class="primary">Save note</button>

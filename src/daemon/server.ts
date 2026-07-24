@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { listProjectFiles } from './files.js';
 import { randomUUID } from 'node:crypto';
-import type { Answer, Block, Note, Question, Status } from '../types.js';
-import { validateQuestions } from '../types.js';
+import type { Answer, Block, Note, NoteIntent, Question, Status } from '../types.js';
+import { INTENT_PRIORITY, NOTE_INTENTS, validateQuestions } from '../types.js';
 import { normalize } from '../doc/blocks.js';
 import { parseDocument } from '../doc/ids.js';
 import { reanchorAll } from '../doc/anchor.js';
@@ -159,8 +159,10 @@ export function createDaemonServer(ctx: Ctx): Server {
       parts.push('\n---\n\n## Review notes\n');
       for (const n of state.notes) {
         parts.push(
-          `- [rev ${n.createdAgainstRevision}, ${n.resolved.fidelity}, ` +
-            `${n.resolved.blockId ?? 'unanchored'}] "${n.quote}" — ${n.body}\n`
+          `- [rev ${n.createdAgainstRevision}, ${n.intent}, ${n.resolved.fidelity}, ` +
+            `${n.resolved.blockId ?? 'unanchored'}] "${n.quote}" — ${n.body}` +
+            (n.suggestion ? ` (suggested: "${n.suggestion}")` : '') +
+            '\n'
         );
       }
     }
@@ -173,6 +175,37 @@ export function createDaemonServer(ctx: Ctx): Server {
     // Project file paths for @-mentions in notes. The project root is the
     // directory that owns .livedoc/.
     'GET /api/files': (_req, res) => json(res, 200, { files: listProjectFiles(dirname(store.dir)) }),
+
+    // Timeline of every draft with the notes written against each — the
+    // browsable record of why the plan ended up the way it did.
+    'GET /api/history': (_req, res) => {
+      const revisions = store.listRevisions().map((n) => ({
+        revision: n,
+        current: n === state.revision,
+        notes: state.notes
+          .filter((x) => x.createdAgainstRevision === n)
+          .map(({ id, quote, body, intent, state: noteState, suggestion, blockId }) => ({
+            id,
+            quote,
+            body,
+            intent,
+            state: noteState,
+            suggestion,
+            blockId,
+          })),
+      }));
+      json(res, 200, { current: state.revision, revisions });
+    },
+
+    'GET /api/revision': (_req, res, url) => {
+      const n = Number(url.searchParams.get('n'));
+      const md = Number.isInteger(n) ? store.loadRevision(n) : null;
+      if (md === null) throw new HttpError(404, `no revision ${url.searchParams.get('n')}`);
+      json(res, 200, {
+        revision: n,
+        blocks: parseDocument(md).map((b) => ({ ...b, html: renderBlock(b) })),
+      });
+    },
 
     'GET /api/events': (_req, res) => {
       res.writeHead(200, {
@@ -212,9 +245,12 @@ export function createDaemonServer(ctx: Ctx): Server {
       if (!block) throw new HttpError(404, `no block with id "${blockId}"`);
       const text = String(body.body ?? '').trim();
       if (!text) throw new HttpError(400, 'note body is empty');
+      const suggestion = String(body.suggestion ?? '').trim();
       const note: Note = {
         id: 'n-' + Date.now().toString(36) + '-' + randomUUID().slice(0, 8),
         state: 'new',
+        intent: NOTE_INTENTS.includes(body.intent as NoteIntent) ? (body.intent as NoteIntent) : 'change',
+        ...(suggestion ? { suggestion } : {}),
         body: text,
         quote: String(body.quote ?? ''),
         contextBefore: String(body.contextBefore ?? ''),
@@ -237,7 +273,9 @@ export function createDaemonServer(ctx: Ctx): Server {
       for (const n of batch) n.state = 'sent';
       store.saveComments(state.notes);
       bus.broadcast('note', { sent: batch.length });
-      bus.wakeAgent({ status: 'feedback', revision: state.revision, notes: batch });
+      // Blockers first, nits last — the agent addresses them in this order.
+      const ordered = [...batch].sort((a, b) => INTENT_PRIORITY[a.intent] - INTENT_PRIORITY[b.intent]);
+      bus.wakeAgent({ status: 'feedback', revision: state.revision, notes: ordered });
       json(res, 200, { status: 'ok', sent: batch.length });
     },
 
@@ -348,9 +386,20 @@ export function createDaemonServer(ctx: Ctx): Server {
           state.notes.splice(idx, 1);
         } else {
           const body = await readBody(req);
-          const text = String(body.body ?? '').trim();
-          if (!text) throw new HttpError(400, 'note body is empty');
-          state.notes[idx].body = text;
+          const note = state.notes[idx];
+          if (body.body !== undefined) {
+            const text = String(body.body).trim();
+            if (!text) throw new HttpError(400, 'note body is empty');
+            note.body = text;
+          }
+          if (body.intent !== undefined && NOTE_INTENTS.includes(body.intent as NoteIntent)) {
+            note.intent = body.intent as NoteIntent;
+          }
+          if (body.suggestion !== undefined) {
+            const s = String(body.suggestion).trim();
+            if (s) note.suggestion = s;
+            else delete note.suggestion;
+          }
         }
         store.saveComments(state.notes);
         bus.broadcast('note', { [req.method === 'DELETE' ? 'deleted' : 'edited']: noteMatch[1] });

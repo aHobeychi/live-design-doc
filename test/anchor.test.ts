@@ -8,6 +8,7 @@ function noteOn(blockId: string, quote: string, blockText: string, ctx: Partial<
   return {
     id: 'n-test',
     state: 'sent',
+    intent: 'change',
     body: 'x',
     quote,
     contextBefore: '',
