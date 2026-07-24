@@ -355,6 +355,37 @@
   }
   #toast.error { background: var(--danger); }
   @keyframes toast-in { from { transform: translate(-50%, 8px); opacity: 0; } to { transform: translateX(-50%); opacity: 1; } }
+  /* ---- @file mention autocomplete ---- */
+  #mention {
+    position: fixed;
+    z-index: 40;
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    font-family: var(--mono);
+    font-size: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 4px 14px rgba(20, 20, 18, 0.12);
+  }
+  .mention-item {
+    padding: 5px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    direction: rtl; /* long paths keep their filename end visible */
+    text-align: left;
+  }
+  .mention-item.active { background: var(--ink); color: var(--paper); }
+  .fileref {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: #eef5f0;
+    color: var(--accent);
+    padding: 0 4px;
+    border-radius: 2px;
+  }
   [hidden] { display: none !important; }
   /* ---- narrow: margin collapses, notes stack under the document ---- */
   @media (max-width: 1040px) {
@@ -412,6 +443,7 @@
     </div>
   </dialog>
   <div id="toast" hidden></div>
+  <div id="mention" hidden></div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

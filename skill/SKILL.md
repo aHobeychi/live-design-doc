@@ -54,6 +54,9 @@ Every command prints one line of JSON on stdout. Parse that; ignore stderr.
      then `livedoc push` and return to waiting. Each note has the quoted text and the
      block it anchors to. If you disagree with a note, say so *in the document* (e.g. in
      a rationale line or Open questions) — there is no chat channel.
+     A note may reference project files as `@relative/path` (e.g. `@src/daemon/store.ts`)
+     — **read every referenced file before revising**; the human pointed at it for a
+     reason.
    - `{"status":"approved","approvedPath":"..."}` — the plan is frozen. Go to step 5.
    - Non-zero exit — the daemon died. Run `livedoc start PLAN.md` and wait again.
 

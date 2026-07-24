@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { listProjectFiles } from './files.js';
 import { randomUUID } from 'node:crypto';
 import type { Answer, Block, Note, Question, Status } from '../types.js';
 import { validateQuestions } from '../types.js';
@@ -168,6 +169,10 @@ export function createDaemonServer(ctx: Ctx): Server {
 
   const routes: Record<string, (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<void> | void> = {
     'GET /api/doc': (_req, res) => json(res, 200, snapshot(state)),
+
+    // Project file paths for @-mentions in notes. The project root is the
+    // directory that owns .livedoc/.
+    'GET /api/files': (_req, res) => json(res, 200, { files: listProjectFiles(dirname(store.dir)) }),
 
     'GET /api/events': (_req, res) => {
       res.writeHead(200, {

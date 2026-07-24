@@ -44,6 +44,109 @@ function toast(message, kind = 'error') {
 }
 const oops = (e) => toast(e.message || String(e));
 
+// ---- @file mentions ----------------------------------------------------------
+
+let fileListPromise = null;
+function projectFiles() {
+  fileListPromise ??= api('GET', '/api/files').then((d) => d.files, () => []);
+  return fileListPromise;
+}
+
+const MENTION_TOKEN = /@([\w./-]*)$/;
+
+/** Wire @-autocomplete over project files into a textarea. */
+function attachMentions(ta) {
+  const menu = $('#mention');
+  let items = [];
+  let active = 0;
+
+  const close = () => {
+    menu.hidden = true;
+    items = [];
+  };
+  const tokenAt = () => {
+    const upto = ta.value.slice(0, ta.selectionStart);
+    const m = MENTION_TOKEN.exec(upto);
+    return m ? { start: upto.length - m[0].length, query: m[1] } : null;
+  };
+  const renderMenu = () => {
+    if (items.length === 0) return close();
+    menu.innerHTML = '';
+    items.forEach((f, i) => {
+      const d = document.createElement('div');
+      d.className = 'mention-item' + (i === active ? ' active' : '');
+      d.textContent = f;
+      d.onmousedown = (e) => {
+        e.preventDefault();
+        pick(i);
+      };
+      menu.appendChild(d);
+    });
+    const r = ta.getBoundingClientRect();
+    menu.style.left = r.left + 'px';
+    menu.style.top = r.bottom + 4 + 'px';
+    menu.style.minWidth = r.width + 'px';
+    menu.style.maxWidth = Math.max(r.width, 360) + 'px';
+    menu.hidden = false;
+  };
+  const pick = (i) => {
+    const tok = tokenAt();
+    if (!tok || !items[i]) return close();
+    const before = ta.value.slice(0, tok.start);
+    const after = ta.value.slice(ta.selectionStart);
+    ta.value = `${before}@${items[i]} ${after}`;
+    const pos = before.length + items[i].length + 2;
+    ta.setSelectionRange(pos, pos);
+    ta.focus();
+    close();
+  };
+
+  ta.addEventListener('input', async () => {
+    const tok = tokenAt();
+    if (!tok) return close();
+    const files = await projectFiles();
+    const q = tok.query.toLowerCase();
+    items = files.filter((f) => f.toLowerCase().includes(q)).slice(0, 8);
+    active = 0;
+    renderMenu();
+  });
+  ta.addEventListener('keydown', (e) => {
+    if (menu.hidden || items.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      active = (active + 1) % items.length;
+      renderMenu();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      active = (active - 1 + items.length) % items.length;
+      renderMenu();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      pick(active);
+    } else if (e.key === 'Escape') {
+      e.stopPropagation();
+      close();
+    }
+  });
+  ta.addEventListener('blur', () => setTimeout(close, 120));
+}
+
+/** Set note text with @file references rendered as code chips. */
+function setBodyWithRefs(el, text) {
+  el.textContent = '';
+  const re = /@[\w./-]*[\w/]/g;
+  let last = 0;
+  for (const m of text.matchAll(re)) {
+    el.append(text.slice(last, m.index));
+    const chip = document.createElement('code');
+    chip.className = 'fileref';
+    chip.textContent = m[0];
+    el.append(chip);
+    last = m.index + m[0].length;
+  }
+  el.append(text.slice(last));
+}
+
 // ---- load & render ----------------------------------------------------------
 
 async function load() {
@@ -199,7 +302,7 @@ function renderNotes(notes) {
       badge +
       `<span class="quote"></span><span class="body"></span>`;
     el.querySelector('.quote').textContent = `“${n.quote}”`;
-    el.querySelector('.body').textContent = n.body;
+    setBodyWithRefs(el.querySelector('.body'), n.body);
     if (n.state === 'new') {
       el.querySelector('.del').onclick = () =>
         api('DELETE', `/api/comments/${n.id}`).then(load).catch(oops);
@@ -239,6 +342,7 @@ function startEdit(el, n) {
   };
   row.append(cancel, save);
   body.replaceWith(ta, row);
+  attachMentions(ta);
   ta.focus();
   ta.setSelectionRange(ta.value.length, ta.value.length);
   requestAnimationFrame(layoutMargin);
@@ -395,6 +499,7 @@ $('#composer-save').onclick = () => {
 $('#composer-text').addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') $('#composer-save').click();
 });
+attachMentions($('#composer-text'));
 
 // ---- send & approve ---------------------------------------------------------
 

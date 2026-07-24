@@ -71,6 +71,12 @@ test('boot: file with content lands in review at revision 1', async () => {
   assert.ok(doc.blocks.some((b) => b.id === 't-limiter'));
 });
 
+test('file list for @-mentions includes the plan and hides .livedoc', async () => {
+  const { files } = await req<{ files: string[] }>('GET', '/api/files');
+  assert.ok(files.includes('PLAN.md'));
+  assert.ok(files.every((f) => !f.startsWith('.livedoc')));
+});
+
 test('wait returns the timeout sentinel with a fast timeout', async () => {
   const t0 = Date.now();
   const result = await req<WaitResult>('GET', '/api/wait?timeout=1');
