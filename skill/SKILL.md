@@ -99,3 +99,8 @@ Every command prints one line of JSON on stdout. Parse that; ignore stderr.
 - Cite evidence in the plan itself: when a claim rests on existing code, reference the
   file as `@relative/path` — the reviewer can preview it inline, which kills "are you
   sure that exists?" round-trips. Only reference paths that actually exist.
+- UI mockups: when the plan touches a screen, sketch it in a ` ```mockup ` fence
+  (box-drawing ASCII) or a ` ```mockup:html ` fence (self-contained HTML/CSS —
+  rendered live but sandboxed, so scripts never run; add `height=480` to the info
+  string if the default 320px viewport is too short). One screen per fence: the
+  whole mockup is a single block, so the reviewer's notes anchor to it as a unit.

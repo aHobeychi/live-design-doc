@@ -348,7 +348,7 @@ function renderNotes(notes) {
         : '') +
       badge +
       `<span class="quote"></span><span class="body"></span>`;
-    el.querySelector('.quote').textContent = `“${n.quote}”`;
+    el.querySelector('.quote').textContent = n.quote ? `“${n.quote}”` : 'whole mockup';
     setBodyWithRefs(el.querySelector('.body'), n.body);
     if (n.suggestion) {
       const s = document.createElement('div');
@@ -642,17 +642,33 @@ $('#composer-suggest').onclick = () => {
   }
 };
 
-$('#addnote').onclick = () => {
+function openComposer() {
   if (!pendingSelection) return;
   $('#addnote').hidden = true;
-  $('#composer-quote').textContent = `“${pendingSelection.quote}”`;
+  $('#composer-quote').textContent = pendingSelection.quote
+    ? `“${pendingSelection.quote}”`
+    : 'whole mockup';
   $('#composer-text').value = '';
   $('#composer-suggestion').value = '';
   $('#composer-suggestion').hidden = true;
   document.querySelector('#composer-intent [data-intent="change"]').click();
   $('#composer').hidden = false;
   $('#composer-text').focus();
-};
+}
+
+$('#addnote').onclick = openComposer;
+
+// Sandboxed mockup iframes swallow selection and pointer events, so their
+// blocks carry a dedicated button that files a block-level note (empty quote —
+// anchored by block id alone, see reanchor()).
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest?.('.mock-note');
+  if (!btn || historyView !== null) return;
+  const blockEl = btn.closest('.block[data-id]');
+  if (!blockEl) return;
+  pendingSelection = { blockId: blockEl.dataset.id, quote: '', contextBefore: '', contextAfter: '' };
+  openComposer();
+});
 
 $('#composer-cancel').onclick = () => ($('#composer').hidden = true);
 $('#composer-save').onclick = () => {

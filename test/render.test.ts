@@ -71,6 +71,38 @@ test('code fence renders its body without the fence lines', () => {
   assert.ok(!html.includes('```'));
 });
 
+test('mockup fence renders as a wireframe pre, not a plain code block', () => {
+  const [block] = parseDocument('```mockup\n+------+\n| Save |\n+------+\n```');
+  const html = renderBlock(block);
+  assert.ok(html.includes('<pre class="mockup">'));
+  assert.ok(html.includes('| Save |'));
+  assert.ok(!html.includes('```'));
+});
+
+test('mockup:html fence renders a sandboxed iframe with the body escaped into srcdoc', () => {
+  const [block] = parseDocument('```mockup:html\n<button class="cta">Go</button>\n```');
+  const html = renderBlock(block);
+  assert.ok(html.includes('<iframe class="mockup" sandbox=""'));
+  assert.ok(html.includes('height="320"'));
+  // Body must live only inside the escaped srcdoc attribute — never raw in the page.
+  assert.ok(html.includes('&lt;button class=&quot;cta&quot;&gt;Go&lt;/button&gt;'));
+  assert.ok(!html.includes('<button class="cta"'));
+  // The only live element besides the iframe is the note affordance.
+  assert.ok(html.includes('<button class="mock-note"'));
+});
+
+test('mockup:html honors height= in the info string', () => {
+  const [block] = parseDocument('```mockup:html height=480\n<p>tall</p>\n```');
+  assert.ok(renderBlock(block).includes('height="480"'));
+});
+
+test('ordinary language fences are untouched by mockup handling', () => {
+  const [block] = parseDocument('```js\nconst mockup = 1;\n```');
+  const html = renderBlock(block);
+  assert.ok(html.includes('<pre><code>'));
+  assert.ok(!html.includes('iframe'));
+});
+
 test('checkbox list item renders a tick with its state', () => {
   const blocks = parseDocument('- [ ] pending {#t-a}\n- [x] finished {#t-b}');
   const todo = renderBlock(blocks[0]);

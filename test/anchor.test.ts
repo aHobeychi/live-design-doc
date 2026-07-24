@@ -28,6 +28,21 @@ test('tier 1: quote still in the original block → exact', () => {
   assert.deepEqual(reanchor(note, blocks), { blockId: 't', fidelity: 'exact' });
 });
 
+test('block-level note (empty quote): surviving block id → exact', () => {
+  const blocks = parseDocument('```mockup:html\n<button>Save</button>\n```\n\nProse after.');
+  const note = noteOn(blocks[0].id, '', blocks[0].text);
+  assert.deepEqual(reanchor(note, blocks), { blockId: blocks[0].id, fidelity: 'exact' });
+});
+
+test('block-level note: edited mockup re-anchors by similarity, not exact', () => {
+  const before = parseDocument('```mockup:html\n<button>Save changes now</button>\n<p>Settings form panel</p>\n```');
+  const after = parseDocument('```mockup:html\n<button>Save changes</button>\n<p>Settings form panel</p>\n```');
+  const note = noteOn(before[0].id, '', before[0].text);
+  const r = reanchor(note, after);
+  assert.equal(r.fidelity, 'approximate');
+  assert.equal(r.blockId, after[0].id);
+});
+
 test('tier 2: quote plus context found in another block → moved', () => {
   const original = 'backed by Redis, 100 req/min per key';
   const blocks = parseDocument(`Intro paragraph here.\n\nNow ${original} as before.`);

@@ -171,7 +171,7 @@ export function createDaemonServer(ctx: Ctx): Server {
       for (const n of state.notes) {
         parts.push(
           `- [rev ${n.createdAgainstRevision}, ${n.intent}, ${n.resolved.fidelity}, ` +
-            `${n.resolved.blockId ?? 'unanchored'}] "${n.quote}" — ${n.body}` +
+            `${n.resolved.blockId ?? 'unanchored'}] ${n.quote ? `"${n.quote}"` : '(whole block)'} — ${n.body}` +
             (n.suggestion ? ` (suggested: "${n.suggestion}")` : '') +
             '\n'
         );

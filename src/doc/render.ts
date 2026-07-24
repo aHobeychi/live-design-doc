@@ -41,6 +41,36 @@ export function renderInline(md: string): string {
 
 const LIST_RE = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
 
+// Injected into every mockup iframe so bare HTML fragments look intentional and
+// stay readable in dark mode (the srcdoc document can't see the page's tokens;
+// colors mirror --ink/--paper in index.html for both schemes).
+const MOCKUP_BASE_CSS =
+  '*{box-sizing:border-box}' +
+  'body{margin:16px;font-family:system-ui,sans-serif;font-size:14px;color:#1a1a14;background:#fdfdfc}' +
+  '@media (prefers-color-scheme:dark){body{color:#ece9e2;background:#17160f}}';
+
+/**
+ * Mockup fences: ```mockup renders as an ASCII wireframe, ```mockup:html renders
+ * the body inside a fully sandboxed iframe (empty sandbox: no scripts, no origin),
+ * so the agent can sketch real HTML/CSS. The source stays plain text inside the
+ * fence, so mockups anchor, diff, and freeze into approved-*.md like any block.
+ */
+function renderMockup(info: string, body: string): string {
+  if (/^mockup:html(\s|$)/.test(info)) {
+    const h = /(?:^|\s)height=(\d{2,4})(?:\s|$)/.exec(info);
+    const doc = `<style>${MOCKUP_BASE_CSS}</style>${body}`;
+    // The iframe swallows pointer events and offers no selectable text, so the
+    // selection→note flow can't reach this block — the button is the only way
+    // to attach a (block-level, empty-quote) note to an HTML mockup.
+    return (
+      `<button class="mock-note" title="Add a note on this mockup">+ note</button>` +
+      `<iframe class="mockup" sandbox="" title="UI mockup" loading="lazy" ` +
+      `height="${h ? h[1] : 320}" srcdoc="${escapeHtml(doc)}"></iframe>`
+    );
+  }
+  return `<pre class="mockup"><code>${escapeHtml(body)}</code></pre>`;
+}
+
 function renderTable(text: string): string {
   const rows = text
     .split('\n')
@@ -86,8 +116,12 @@ export function renderBlockInner(b: Block): string {
       return renderInline(b.text.replace(/^#{1,6}\s+/, ''));
     case 'code': {
       const lines = b.text.split('\n');
-      const body = lines.slice(1, lines.at(-1)?.trimStart().match(/^(```|~~~)/) ? -1 : undefined);
-      return `<pre><code>${escapeHtml(body.join('\n'))}</code></pre>`;
+      const body = lines
+        .slice(1, lines.at(-1)?.trimStart().match(/^(```|~~~)/) ? -1 : undefined)
+        .join('\n');
+      const info = lines[0].trim().replace(/^(`{3,}|~{3,})\s*/, '');
+      if (/^mockup(:|\s|$)/.test(info)) return renderMockup(info, body);
+      return `<pre><code>${escapeHtml(body)}</code></pre>`;
     }
     case 'table':
       return renderTable(b.text);
