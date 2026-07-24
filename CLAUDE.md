@@ -8,6 +8,9 @@ section numbers referenced throughout the code as `design §x.y`).
 
 ## Ground rules
 
+- **Human authors only on commits.** Never add AI/agent `Co-Authored-By:` trailers
+  (e.g. Claude, Copilot, Codex) or any other agent attribution to commit messages.
+  Human co-authors are fine.
 - **Zero runtime dependencies.** `scripts/no-deps-check.js` fails `npm run check` if
   `package.json` ever gains a `dependencies` entry. Node's stdlib only
   (`node:http`, `node:fs`, `node:crypto`, etc). Don't add a package to solve a problem
