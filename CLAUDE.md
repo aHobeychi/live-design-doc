@@ -11,6 +11,13 @@ section numbers referenced throughout the code as `design §x.y`).
 - **Human authors only on commits.** Never add AI/agent `Co-Authored-By:` trailers
   (e.g. Claude, Copilot, Codex) or any other agent attribution to commit messages.
   Human co-authors are fine.
+- **Conventional commit subjects on `main`.** `.github/workflows/release.yml` derives the
+  npm version bump from commit subjects since the last tag (`scripts/release.js`):
+  `feat:` -> minor, `fix:`/`perf:` -> patch, a `!` after the type/scope (e.g. `feat!:`) or
+  a `BREAKING CHANGE:` footer -> major. Other prefixes (`chore:`, `docs:`, `refactor:`,
+  `test:`, `ci:`, ...) don't trigger a release. Commits that skip the prefix entirely are
+  invisible to the bump logic — merges to `main` intended to ship should use one of
+  `feat`/`fix`/`perf` (or `!`/`BREAKING CHANGE` for a major).
 - **Zero runtime dependencies.** `scripts/no-deps-check.js` fails `npm run check` if
   `package.json` ever gains a `dependencies` entry. Node's stdlib only
   (`node:http`, `node:fs`, `node:crypto`, etc). Don't add a package to solve a problem
