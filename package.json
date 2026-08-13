@@ -1,6 +1,6 @@
 {
   "name": "live-design-doc",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live plan review: the agent writes, the human annotates in a browser, the agent revises.",
   "type": "module",
   "license": "MIT",
@@ -13,13 +13,25 @@
   "bugs": {
     "url": "https://github.com/aHobeychi/live-design-doc/issues"
   },
-  "keywords": ["cli", "agent", "design-doc", "code-review", "claude-code"],
+  "keywords": [
+    "cli",
+    "agent",
+    "design-doc",
+    "code-review",
+    "claude-code"
+  ],
   "bin": {
     "live-design-doc": "dist/src/cli.js",
     "livedoc": "dist/src/cli.js"
   },
-  "engines": { "node": ">=22" },
-  "files": ["dist", "skill", "!dist/test"],
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "skill",
+    "!dist/test"
+  ],
   "scripts": {
     "build": "tsc && mkdir -p dist/src/web && cp src/web/* dist/src/web/",
     "test": "npm run build && node --test \"dist/test/*.test.js\"",
