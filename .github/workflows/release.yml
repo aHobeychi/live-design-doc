@@ -44,5 +44,8 @@ jobs:
       - name: Publish to npm
         if: steps.version.outputs.bump != 'none'
         run: |
+          # Trusted Publishing (OIDC) — no NPM_TOKEN secret. Requires npm >= 11.5.1
+          # and a trusted publisher configured on the npm package settings page
+          # pointing at this repo + this workflow file.
           npm install -g npm@latest
           npm publish --provenance
