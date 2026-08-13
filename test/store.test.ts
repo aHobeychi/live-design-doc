@@ -105,6 +105,28 @@ test('session write/read/clear', () => {
   }
 });
 
+test('reset clears stale repo state so a fresh doc does not inherit older notes', () => {
+  const { store, cleanup } = tempStore();
+  try {
+    store.writeSession({ pid: 1, port: 4317, url: 'http://127.0.0.1:4317', file: '/old.md', startedAt: 't' });
+    store.saveComments([NOTE]);
+    store.saveAnswers({ questions: [], answers: [], answeredAt: 't' });
+    store.saveRevision(1, '# old');
+    store.savePending([]);
+
+    store.reset();
+
+    assert.equal(store.readSession(), null);
+    assert.deepEqual(store.loadComments(), []);
+    assert.equal(store.loadAnswers(), null);
+    assert.deepEqual(store.loadPending(), []);
+    assert.equal(store.maxRevision(), 0);
+    assert.ok(existsSync(join(store.dir, 'revisions')));
+  } finally {
+    cleanup();
+  }
+});
+
 test('atomic writes leave no .tmp files behind', () => {
   const { store, cleanup } = tempStore();
   try {

@@ -136,4 +136,22 @@ export class Store {
       /* already gone */
     }
   }
+
+  /** Drop all persisted review state for a fresh session in the same repo. */
+  reset(): void {
+    this.clearSession();
+    for (const name of ['comments.json', 'answers.json', 'pending.json']) {
+      try {
+        rmSync(join(this.dir, name));
+      } catch {
+        /* already gone */
+      }
+    }
+    try {
+      rmSync(join(this.dir, 'revisions'), { recursive: true, force: true });
+      mkdirSync(join(this.dir, 'revisions'), { recursive: true });
+    } catch {
+      /* if the directory is somehow unavailable */
+    }
+  }
 }

@@ -147,7 +147,14 @@
     gap: 44px;
     padding: 56px 24px 140px;
   }
-  #doc { width: 640px; max-width: 100%; font-size: 17.5px; line-height: 1.72; hanging-punctuation: first; }
+  #doc {
+    width: min(72ch, 100%);
+    min-width: 0;
+    max-width: 100%;
+    font-size: 17.5px;
+    line-height: 1.72;
+    hanging-punctuation: first;
+  }
   #doc :is(p, ul, ol) { text-wrap: pretty; }
   #margin { position: relative; width: 264px; flex-shrink: 0; }
   /* ---- table of contents (wide screens only) ---- */
@@ -448,6 +455,11 @@
   }
   /* ---- dialog & toast (replacing browser confirm/alert) ---- */
   dialog {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
     border: 1px solid var(--hairline-strong);
     border-radius: var(--radius-lg);
     background: var(--paper);
@@ -459,7 +471,10 @@
   }
   dialog::backdrop { background: rgba(20, 20, 18, 0.32); backdrop-filter: blur(1px); }
   dialog[open] { animation: dialog-in 0.16s ease-out; }
-  @keyframes dialog-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes dialog-in {
+    from { transform: translate(-50%, calc(-50% + 8px)); opacity: 0; }
+    to { transform: translate(-50%, -50%); opacity: 1; }
+  }
   #dialog-title {
     font-family: var(--mono);
     font-size: 11px;

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Store } from '../daemon/store.js';
 import { api, emit, fail, LIVEDOC_DIR, probe, readSession } from './api.js';
 
 function openBrowser(url: string): void {
@@ -67,16 +68,27 @@ export async function start(args: string[]): Promise<void> {
   // Idempotent start (design §12): a live session is reused and reloaded.
   const existing = readSession();
   if (existing && (await probe(existing))) {
-    if (existsSync(file)) {
+    if (resolve(existing.file) !== file) {
       try {
-        await api('POST', '/api/reload');
+        await fetch(`${existing.url}/api/shutdown`, { method: 'POST' });
       } catch {
-        /* empty file: daemon stays in its current phase */
+        /* ignore shutdown errors; the daemon is stale anyway */
       }
+      const store = new Store(dir);
+      store.reset();
+      console.error(`livedoc: switching to ${fileArg} and clearing stale state from ${existing.file}`);
+    } else {
+      if (existsSync(file)) {
+        try {
+          await api('POST', '/api/reload');
+        } catch {
+          /* empty file: daemon stays in its current phase */
+        }
+      }
+      console.error(`livedoc: reusing session at ${existing.url}`);
+      emit({ status: 'ok', url: existing.url, port: existing.port, reused: true });
+      return;
     }
-    console.error(`livedoc: reusing session at ${existing.url}`);
-    emit({ status: 'ok', url: existing.url, port: existing.port, reused: true });
-    return;
   }
 
   const boot = await spawnDaemon(file, dir);
