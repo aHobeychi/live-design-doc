@@ -5,6 +5,10 @@ import { wait } from './commands/wait.js';
 import { ask, progress, push, stop, verify } from './commands/misc.js';
 import { init } from './commands/init.js';
 import { maybeFirstRunSetup } from './commands/setup.js';
+import { createRequire } from 'node:module';
+
+// Read the shipped package.json so `--version` can't drift from the released version.
+const { version } = createRequire(import.meta.url)('../../package.json') as { version: string };
 
 const HELP = `live-design-doc (livedoc) — live plan review between a coding agent and a human
 
@@ -45,7 +49,7 @@ async function main(): Promise<void> {
       return init(rest);
     case '--version':
     case 'version':
-      return void console.log('0.1.0');
+      return void console.log(version);
     case 'help':
     case '--help':
     case undefined:
