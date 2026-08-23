@@ -257,6 +257,54 @@ test('progress requires evidence; verify tracks plan-vs-reality to done', async 
   assert.equal(end.complete, true);
 });
 
+// ---- dismissing notes (design §7.2: a view control, not a reply channel) ----
+
+test('a sent note can be dismissed and undismissed, but still not edited', async () => {
+  const doc = await req<{ notes: Note[] }>('GET', '/api/doc');
+  const sent = doc.notes.find((n) => n.state === 'sent')!;
+  assert.ok(sent, 'expected a sent note from the earlier tests');
+  assert.equal(sent.dismissed, undefined);
+
+  const dismissed = await req<Note>('PATCH', `/api/comments/${sent.id}`, { dismissed: true });
+  assert.equal(dismissed.dismissed, true);
+
+  // Dismissal is the only mutation a sent note accepts.
+  await assert.rejects(
+    req('PATCH', `/api/comments/${sent.id}`, { body: 'rewritten' }),
+    /never edited or deleted/
+  );
+  await assert.rejects(
+    req('PATCH', `/api/comments/${sent.id}`, { dismissed: true, body: 'sneaky' }),
+    /never edited or deleted/
+  );
+  await assert.rejects(req('DELETE', `/api/comments/${sent.id}`), /never edited or deleted/);
+
+  const undone = await req<Note>('PATCH', `/api/comments/${sent.id}`, { dismissed: false });
+  assert.equal(undone.dismissed, undefined, 'undismissing removes the flag entirely');
+});
+
+test('dismissal survives on disk and never reaches the agent', async () => {
+  const doc = await req<{ notes: Note[] }>('GET', '/api/doc');
+  const target = doc.notes.find((n) => n.state === 'sent')!;
+  await req('PATCH', `/api/comments/${target.id}`, { dismissed: true });
+
+  const file = JSON.parse(
+    readFileSync(join(dir, '.livedoc', 'sessions', sessionId, 'comments.json'), 'utf8')
+  );
+  assert.equal(file.notes.find((n: Note) => n.id === target.id).dismissed, true);
+
+  // The agent's only note channel is the feedback batch at send time, so a
+  // dismissal can never be read as "this note was addressed" (design §7.2).
+  const fresh = await req<{ blocks: { id: string }[] }>('GET', '/api/doc');
+  await req('POST', '/api/comments', { blockId: fresh.blocks[0].id, body: 'fresh note', quote: '' });
+  await req('POST', '/api/send');
+  const event = await req<WaitResult>('GET', '/api/wait?timeout=5');
+  assert.equal(event.status, 'feedback');
+  if (event.status === 'feedback') {
+    assert.ok(event.notes.every((n) => n.dismissed === undefined));
+  }
+});
+
 // ---- multiple sessions in one daemon ---------------------------------------
 
 interface SessionRow {

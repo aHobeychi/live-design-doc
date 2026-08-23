@@ -346,13 +346,20 @@ window.addEventListener(
   { passive: true }
 );
 
+let showDismissed = false;
+
 function renderNotes(notes) {
   const box = $('#notes');
   box.innerHTML = '';
-  for (const n of notes) {
+  // Dismissed notes are collapsed, never dropped: the human is done reading
+  // them, but the record and the count stay honest.
+  const hidden = historyView === null ? notes.filter((n) => n.dismissed).length : 0;
+  const visible = showDismissed || historyView !== null ? notes : notes.filter((n) => !n.dismissed);
+  for (const n of visible) {
     const el = document.createElement('div');
     el.className = 'note';
     el.dataset.state = n.state;
+    if (n.dismissed) el.dataset.dismissed = 'true';
     // In history mode the original anchor is the truth for that revision.
     el.dataset.target = (historyView !== null ? n.blockId : n.resolved.blockId) || '';
     const badge =
@@ -364,6 +371,11 @@ function renderNotes(notes) {
       (n.state === 'new' && !historyView
         ? '<button class="del" title="Delete unsent note">×</button>' +
           '<button class="edit" title="Edit unsent note">✎</button>'
+        : '') +
+      // Sent notes cannot be deleted, but the human can collapse one they are
+      // done with — the margin is theirs, the record is untouched.
+      (n.state === 'sent' && !historyView
+        ? `<button class="dismiss" title="${n.dismissed ? 'Show this note again' : 'Done with this note'}">${n.dismissed ? '↩' : '✓'}</button>`
         : '') +
       badge +
       `<span class="quote"></span><span class="body"></span>`;
@@ -410,9 +422,27 @@ function renderNotes(notes) {
       el.querySelector('.edit').onclick = () => startEdit(el, n);
       el.querySelector('.body').ondblclick = () => startEdit(el, n);
     }
+    if (n.state === 'sent' && !historyView) {
+      el.querySelector('.dismiss').onclick = () =>
+        api('PATCH', `/api/comments/${n.id}`, { dismissed: !n.dismissed })
+          .then(load)
+          .catch(oops);
+    }
     el.onmouseenter = () => highlight(el.dataset.target, true);
     el.onmouseleave = () => highlight(el.dataset.target, false);
     box.appendChild(el);
+  }
+  if (hidden > 0) {
+    const toggle = document.createElement('button');
+    toggle.className = 'linkish show-dismissed';
+    toggle.textContent = showDismissed
+      ? 'hide done notes'
+      : `${hidden} done note${hidden > 1 ? 's' : ''}`;
+    toggle.onclick = () => {
+      showDismissed = !showDismissed;
+      renderNotes(notes);
+    };
+    box.appendChild(toggle);
   }
   requestAnimationFrame(layoutMargin);
 }

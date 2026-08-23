@@ -245,9 +245,12 @@ function buildRoutes(
     if (state.notes.length > 0) {
       parts.push('\n---\n\n## Review notes\n');
       for (const n of state.notes) {
+        // Dismissed notes stay in the record — the human collapsed them in
+        // their margin, which says nothing about whether they were addressed.
         parts.push(
           `- [rev ${n.createdAgainstRevision}, ${n.intent}, ${n.resolved.fidelity}, ` +
-            `${n.resolved.blockId ?? 'unanchored'}] ${n.quote ? `"${n.quote}"` : '(whole block)'} — ${n.body}` +
+            `${n.resolved.blockId ?? 'unanchored'}${n.dismissed ? ', dismissed' : ''}] ` +
+            `${n.quote ? `"${n.quote}"` : '(whole block)'} — ${n.body}` +
             (n.suggestion ? ` (suggested: "${n.suggestion}")` : '') +
             '\n'
         );

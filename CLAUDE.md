@@ -71,6 +71,14 @@ human-readable text goes to stderr. Never break that contract when touching
 - **Notes are anchored, never rewritten by the agent.** The agent's only path to a
   human's note is reading it via `wait`; there's no API for the agent to edit or delete
   a `sent` note (`server.ts` explicitly 409s that).
+- **`dismissed` is the human's view control, not a note state** (design §7.2). It is a
+  separate boolean rather than a third `state` value precisely so it can't be confused
+  with the send/immutability machinery. The one mutation a `sent` note accepts is a
+  dismiss-only `PATCH`; any patch that also touches body/intent/suggestion still 409s.
+  It must stay invisible to the agent — notes reach the agent only in the feedback batch
+  at send time, which is before a note can be dismissed — or it becomes exactly the
+  "note was addressed" channel §7.2 exists to prevent. Dismissed notes are collapsed in
+  the margin but kept in `comments.json` and in `approved-*.md`.
 - **Answers become synthesized blocks** (`a-*` ids in `answerBlocks`), not raw JSON —
   keeps clarify answers anchorable and diffable like everything else.
 - **`.livedoc/` split**: per session, `comments.json`, `answers.json`, `approved-*.md` are

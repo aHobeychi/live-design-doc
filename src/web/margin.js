@@ -37,6 +37,10 @@ export function layoutMargin() {
     cursor = y + e.el.offsetHeight + GAP;
   }
 
+  // The "done notes" toggle is not anchored to anything; it trails the stack.
+  const toggle = margin.querySelector('.show-dismissed');
+  if (toggle) toggle.style.top = cursor + 'px';
+
   // Leader curves, drawn in layout-space so they can cross the gutter.
   svg.style.left = -(marginRect.left - layoutRect.left) + 'px';
   svg.style.top = '0';

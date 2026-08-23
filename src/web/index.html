@@ -326,6 +326,30 @@
   }
   .note .badge.moved, .note .badge.approximate { color: var(--warn); background: var(--warn-tint); }
   .note .badge.orphan { color: var(--danger); background: var(--danger-tint); }
+  /* Dismissed: still readable, visibly retired. */
+  .note[data-dismissed="true"] { opacity: 0.5; border-left-color: var(--chrome-soft); }
+  .note[data-dismissed="true"]:hover { opacity: 1; }
+  .note .dismiss {
+    float: right;
+    border: none;
+    background: none;
+    padding: 0 0 0 6px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--chrome-soft);
+  }
+  .note .dismiss:hover { color: var(--accent); }
+  .show-dismissed {
+    position: absolute;
+    width: 100%;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--chrome);
+    padding: 4px 0;
+  }
   .note .del, .note .edit {
     float: right; border: none; padding: 0 3px; color: var(--chrome-soft); font-size: 13px; line-height: 1;
     transition: color 0.12s ease;
@@ -759,6 +783,7 @@
     #margin { width: 640px; max-width: 100%; }
     #leaders { display: none; }
     .note { position: static; margin-bottom: 10px; }
+    .show-dismissed { position: static; }
   }
   /* ---- dark mode: same semantic variables, re-toned ---- */
   @media (prefers-color-scheme: dark) {

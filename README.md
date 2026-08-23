@@ -42,6 +42,15 @@ Every command prints one line of JSON on stdout; human-readable messages go to s
 `wait` exits 0 on `{"status":"timeout"}` (loop again) and non-zero only when the daemon
 is unreachable (run `start` again).
 
+## Notes
+
+Highlight text, leave a note, press Send — the agent picks the batch up on its next
+`livedoc wait`. Once you're done with a note, the **✓** on it collapses it behind a
+"N done notes" toggle so the margin doesn't accumulate across revisions. That's a view
+control of your own: dismissed notes are never deleted, they stay in `comments.json` and
+in the approved record, and the agent never sees the flag. Whether a note actually landed
+is answered by reading the next revision, not by a checkbox.
+
 ## Sessions
 
 Several plans can be under review at the same time — one session per plan file, all

@@ -257,10 +257,19 @@ silently drops feedback gets abandoned after the first time it happens.
 
 `new` → (human presses Send) → `sent`. That is the whole lifecycle.
 
-There is no reply thread and no resolve button. The agent's reply *is* the next revision of
-the document — if a note did not land, that is visible by reading the block it was attached
-to. Adding a second channel where the agent explains itself in prose would duplicate the
-document and give the human two places to read instead of one.
+There is no reply thread and **the agent has no resolve button**. The agent's reply *is* the
+next revision of the document — if a note did not land, that is visible by reading the block
+it was attached to. Adding a second channel where the agent explains itself in prose would
+duplicate the document and give the human two places to read instead of one. Nothing the
+agent does can mark a note settled, so it can never claim a note was addressed without the
+document changing.
+
+The **human** may dismiss a note they are done with (`dismissed: true`). This is a view
+control over their own margin, not part of the lifecycle above: by revision 5, notes from
+revision 1 have accumulated, and the reader needs to put the settled ones away. Dismissed
+notes are collapsed behind a "N done notes" toggle, never removed — they stay in
+`comments.json`, stay in the approved record (marked `dismissed`), and the flag is invisible
+to the agent, which only ever sees notes in the feedback batch at send time.
 
 Notes are never deleted once sent. Unsent notes can be deleted by their author.
 
