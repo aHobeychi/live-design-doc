@@ -1,6 +1,6 @@
 {
   "name": "live-design-doc",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Live plan review: the agent writes, the human annotates in a browser, the agent revises.",
   "type": "module",
   "license": "MIT",
