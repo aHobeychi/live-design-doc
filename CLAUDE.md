@@ -31,11 +31,12 @@ section numbers referenced throughout the code as `design §x.y`).
 ```
 src/cli.ts              entry point, dispatches to commands/
 src/commands/           one file per CLI verb (start, ask, wait, misc, init, setup, skills)
-src/daemon/main.ts      daemon process entry (spawned by `start`, detached)
-src/daemon/server.ts    HTTP API + status machine + route table
-src/daemon/events.ts    Bus: SSE fan-out to browser tabs + single long-poll queue for the agent
+src/daemon/main.ts      daemon process entry (spawned by `start`, detached); createSession()
+src/daemon/server.ts    HTTP API + status machine + route table + session dispatch
+src/daemon/events.ts    Bus: per-session SSE + long-poll queue; Hub: daemon-wide SSE
 src/daemon/session.ts   status transition table (clarifying/drafting/review/approved/executing/done)
-src/daemon/store.ts     .livedoc/ persistence (comments, answers, revisions, approved, session)
+src/daemon/sessions.ts  session ids, the .livedoc/sessions.json registry, flat-layout migration
+src/daemon/store.ts     one session's directory (comments, answers, revisions, approved)
 src/doc/blocks.ts       markdown -> raw blocks, text normalization
 src/doc/ids.ts          block id assignment (explicit {#id} or content hash)
 src/doc/anchor.ts       note re-anchoring across revisions (five-tier fallback, design §7.1)
@@ -46,9 +47,17 @@ skill/SKILL.md          the agent-facing skill doc installed into Claude Code / 
 
 The CLI (`livedoc <cmd>`) is a thin client: it starts/talks to a background daemon
 process over HTTP on `127.0.0.1`, one daemon per project (tracked via
-`.livedoc/session.json`). The daemon holds all state in memory (`DaemonState` in
-`server.ts`) and mirrors the parts that must survive a restart or be committed to
-`.livedoc/` via `Store`.
+`.livedoc/daemon.json`). That daemon holds **many sessions** — one per plan file, keyed
+by an id derived from the plan's path — in `DaemonCtx.sessions`, a `Map<string,
+SessionCtx>`. Each `SessionCtx` owns its own `DaemonState`, its own `Bus`, and its own
+`Store` under `.livedoc/sessions/<id>/`; `DaemonCtx` owns what is not per-session (the
+project root, the web dir, the registry, the `Hub`).
+
+Requests address a session by path prefix — `/api/s/<id>/doc` — stripped once in the
+dispatcher, so route handlers are written against a single `SessionCtx` and never think
+about ids. An un-prefixed `/api/doc` falls back to the default session (the only one, or
+the most recently active), which is what keeps single-session use — and every older
+client — working unchanged.
 
 Every CLI command prints exactly **one line of JSON to stdout** and nothing else;
 human-readable text goes to stderr. Never break that contract when touching
@@ -64,10 +73,23 @@ human-readable text goes to stderr. Never break that contract when touching
   a `sent` note (`server.ts` explicitly 409s that).
 - **Answers become synthesized blocks** (`a-*` ids in `answerBlocks`), not raw JSON —
   keeps clarify answers anchorable and diffable like everything else.
-- **`.livedoc/` split**: `comments.json`, `answers.json`, `approved-*.md` are meant to be
-  committed (the record of what was agreed); `revisions/`, `session.json`, `pending.json`
-  are local/ephemeral (`Store.ensure()` writes a `.livedoc/.gitignore` enforcing this —
-  don't remove that write).
+- **`.livedoc/` split**: per session, `comments.json`, `answers.json`, `approved-*.md` are
+  meant to be committed (the record of what was agreed); `revisions/` and `pending.json`
+  are local/ephemeral, as are the daemon-level `daemon.json` and `current`. Two
+  `.gitignore` writes enforce this — `Store.ensure()` for a session directory and
+  `Registry.ensure()` for the outer one. Don't remove either.
+- **Sessions are per plan file and never destructive.** `sessionIdFor()` derives the id
+  from the plan's path, so `POST /api/sessions` and `createSession()` are idempotent and
+  `livedoc start` on a second plan *adds* a session. It must never reset another plan's
+  state — that regression is what the feature exists to fix, and
+  `test/e2e.test.ts` guards it.
+- **One `Bus` per session, never shared.** An agent parked on `livedoc wait` for one plan
+  must be untouched by activity on another; `Bus` has a single waiter slot, so sharing one
+  would cross agent loops. Session-list changes go through the daemon-level `Hub` instead,
+  which every tab receives regardless of the session it is viewing.
+- **Closing a session keeps its files.** `DELETE /api/sessions/<id>` drops it from the
+  daemon and the registry only; the committed record is the point of the tool, and
+  `livedoc start` on the same plan rehydrates from it.
 - **Question cap**: `QUESTION_CAP = 6` in `types.ts`, enforced in `validateQuestions` and
   again server-side (`/api/questions` also refuses if a draft already exists — forks
   after the first draft go in the document's Open Questions, not a new question round).
@@ -101,5 +123,10 @@ push and PR, Node 22.
 - `Store` writes are atomic (`writeFileSync` to `.tmp` + `renameSync`) and
   `stableStringify` sorts keys recursively so committed JSON diffs stay minimal — follow
   that pattern for any new persisted file.
-- New HTTP routes go in the `routes` record in `server.ts` keyed by `"METHOD /path"`;
-  errors are thrown as `HttpError(code, message)` and caught centrally.
+- New HTTP routes go in the record `buildRoutes()` returns in `server.ts`, keyed by
+  `"METHOD /path"` — written against the resolved `SessionCtx`, with no session id in the
+  key. Routes about the *set* of sessions go in `daemonRoutes` instead. Errors are thrown
+  as `HttpError(code, message)` and caught centrally.
+- New files under `src/web/` must be added to the `staticFiles` allowlist in `server.ts`
+  and stay at the top level: `npm run build` copies with `cp src/web/*`, no `-r`, so
+  subdirectories are silently skipped.

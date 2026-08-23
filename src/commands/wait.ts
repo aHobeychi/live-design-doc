@@ -10,12 +10,13 @@ import { api, DaemonUnreachable, emit, fail } from './api.js';
 export async function wait(args: string[]): Promise<void> {
   const { values } = parseArgs({
     args,
-    options: { timeout: { type: 'string', default: '300' } },
+    options: { timeout: { type: 'string', default: '300' }, session: { type: 'string' } },
   });
   const timeout = Math.min(600, Math.max(1, Number(values.timeout) || 300));
   try {
     const result = await api<WaitResult>('GET', `/api/wait?timeout=${timeout}`, undefined, {
       timeoutMs: (timeout + 60) * 1000,
+      session: values.session,
     });
     emit(result);
   } catch (e) {

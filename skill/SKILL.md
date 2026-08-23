@@ -17,6 +17,15 @@ Every command prints one line of JSON on stdout. Parse that; ignore stderr.
 
    ```bash
    livedoc start PLAN.md --no-open   # omit --no-open the first time so the tab opens
+   # → {"status":"ok","url":"http://127.0.0.1:4317","session":"plan-1d972b4a",...}
+   ```
+
+   Several plans can be under review at once, one session per plan file. **Carry the
+   `session` id from that JSON through the rest of the loop** — export it once and every
+   later command targets the right plan even if another agent or the human starts one:
+
+   ```bash
+   export LIVEDOC_SESSION=plan-1d972b4a   # or pass --session <id> to each command
    ```
 
 2. **Optionally ask clarifying questions — only before your first draft.**
@@ -93,6 +102,8 @@ Every command prints one line of JSON on stdout. Parse that; ignore stderr.
 
 - New forks discovered after the first draft go in *Open questions*, not new modals
   (`livedoc ask` will refuse anyway).
+- Other plans may be open in the same browser, and the human may be looking at one of
+  them. Silence is still not a signal — keep waiting on your own session.
 - Task lists: one item per line, each with a checkbox and an id —
   `- [ ] Add RateLimiter {#t-limiter}` — these are what you tick with `progress`.
 - Keep the plan skimmable: a human reads all of it every revision.

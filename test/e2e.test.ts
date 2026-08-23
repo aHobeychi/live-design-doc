@@ -13,6 +13,7 @@ let dir: string;
 let planPath: string;
 let child: ChildProcess;
 let url: string;
+let sessionId: string;
 
 const PLAN = `# Rate limiter plan
 
@@ -51,7 +52,9 @@ before(async () => {
       const nl = out.indexOf('\n');
       if (nl >= 0) {
         clearTimeout(timer);
-        resolve((JSON.parse(out.slice(0, nl)) as { url: string }).url);
+        const boot = JSON.parse(out.slice(0, nl)) as { url: string; session: string };
+        sessionId = boot.session;
+        resolve(boot.url);
       }
     });
     child.stderr!.on('data', (d: Buffer) => (err += d.toString()));
@@ -209,8 +212,10 @@ test('history lists every revision with its notes; old revisions render read-onl
   await assert.rejects(req('GET', '/api/revision?n=99'), /no revision/);
 });
 
-test('comments.json survives on disk with every sent note', () => {
-  const file = JSON.parse(readFileSync(join(dir, '.livedoc', 'comments.json'), 'utf8'));
+test('comments.json survives on disk under the session directory', () => {
+  const file = JSON.parse(
+    readFileSync(join(dir, '.livedoc', 'sessions', sessionId, 'comments.json'), 'utf8')
+  );
   assert.equal(file.notes.length, 3);
   assert.ok(file.notes.every((n: Note) => n.state === 'sent'));
 });
@@ -250,6 +255,117 @@ test('progress requires evidence; verify tracks plan-vs-reality to done', async 
   assert.equal(doc.status, 'done');
   const end = await req<{ complete: boolean }>('GET', '/api/verify');
   assert.equal(end.complete, true);
+});
+
+// ---- multiple sessions in one daemon ---------------------------------------
+
+interface SessionRow {
+  id: string;
+  name: string;
+  title: string | null;
+  status: string;
+  revision: number;
+  unsentNotes: number;
+  attention: boolean;
+  missing: boolean;
+}
+
+let secondId: string;
+
+test('a second plan becomes its own session without disturbing the first', async () => {
+  const second = join(dir, 'PLAN2.md');
+  writeFileSync(second, '# Second plan\n\nSomething else entirely. {#p-two}\n');
+  const created = await req<SessionRow & { created: boolean }>('POST', '/api/sessions', { file: second });
+  assert.equal(created.created, true);
+  secondId = created.id;
+  assert.notEqual(secondId, sessionId);
+
+  const list = await req<{ sessions: SessionRow[] }>('GET', '/api/sessions');
+  assert.equal(list.sessions.length, 2);
+  const row = list.sessions.find((s) => s.id === secondId)!;
+  assert.equal(row.name, 'PLAN2.md');
+  assert.equal(row.title, 'Second plan', 'the H1 labels the session');
+  assert.equal(row.missing, false);
+
+  // The first session kept everything: this is the regression the whole
+  // feature exists for — starting a second plan used to wipe the first.
+  const first = list.sessions.find((s) => s.id === sessionId)!;
+  assert.equal(first.status, 'done');
+  assert.ok(first.revision >= 1);
+});
+
+test('POST /api/sessions is idempotent — the same plan returns the same session', async () => {
+  const again = await req<SessionRow & { created: boolean }>('POST', '/api/sessions', {
+    file: join(dir, 'PLAN2.md'),
+  });
+  assert.equal(again.created, false);
+  assert.equal(again.id, secondId);
+  const list = await req<{ sessions: SessionRow[] }>('GET', '/api/sessions');
+  assert.equal(list.sessions.length, 2);
+});
+
+test('each session serves its own document, with no cross-contamination', async () => {
+  const one = await req<{ blocks: { id: string }[] }>('GET', `/api/s/${sessionId}/doc`);
+  const two = await req<{ blocks: { id: string }[] }>('GET', `/api/s/${secondId}/doc`);
+  assert.ok(one.blocks.some((b) => b.id === 'p-scope'));
+  assert.ok(!one.blocks.some((b) => b.id === 'p-two'));
+  assert.ok(two.blocks.some((b) => b.id === 'p-two'));
+  assert.ok(!two.blocks.some((b) => b.id === 'p-scope'));
+});
+
+test('an unknown session id is a 404 carrying a null status', async () => {
+  const res = await fetch(url + '/api/s/no-such-session/doc');
+  assert.equal(res.status, 404);
+  const body = (await res.json()) as { error: string; status: null };
+  assert.match(body.error, /no session "no-such-session"/);
+  assert.equal(body.status, null);
+});
+
+// The acceptance test for independent agent loops: a browser switching to one
+// plan must never disturb an agent parked on another.
+test('a wait parked on one session is untouched by feedback sent on another', async () => {
+  const parked = req<WaitResult>('GET', `/api/s/${secondId}/wait?timeout=2`);
+
+  const doc = await req<{ blocks: { id: string }[] }>('GET', `/api/s/${sessionId}/doc`);
+  await req('POST', `/api/s/${sessionId}/comments`, {
+    blockId: doc.blocks[0].id,
+    body: 'a note on the first plan',
+    quote: '',
+  });
+  await req('POST', `/api/s/${sessionId}/send`);
+
+  // Session two's agent stays asleep and times out...
+  assert.deepEqual(await parked, { status: 'timeout' });
+  // ...while session one's feedback was queued for its own agent all along.
+  const own = await req<WaitResult>('GET', `/api/s/${sessionId}/wait?timeout=2`);
+  assert.equal(own.status, 'feedback');
+});
+
+test('a deleted plan file is flagged missing but the session still opens', async () => {
+  rmSync(join(dir, 'PLAN2.md'));
+  const list = await req<{ sessions: SessionRow[] }>('GET', '/api/sessions');
+  assert.equal(list.sessions.find((s) => s.id === secondId)?.missing, true);
+  // The record outlives the file: blocks and notes are still served.
+  const doc = await req<{ blocks: unknown[] }>('GET', `/api/s/${secondId}/doc`);
+  assert.ok(doc.blocks.length > 0);
+  await assert.rejects(req('POST', `/api/s/${secondId}/reload`), /cannot read/);
+});
+
+test('closing a session keeps its files; the last one refuses to close', async () => {
+  const removed = await req<{ removed: string; filesKept: boolean }>(
+    'DELETE',
+    `/api/sessions/${secondId}`
+  );
+  assert.equal(removed.removed, secondId);
+  assert.equal(removed.filesKept, true);
+  assert.ok(
+    existsSync(join(dir, '.livedoc', 'sessions', secondId)),
+    'the committed record must outlive the live session'
+  );
+
+  const list = await req<{ sessions: SessionRow[] }>('GET', '/api/sessions');
+  assert.equal(list.sessions.length, 1);
+  await assert.rejects(req('DELETE', `/api/sessions/${sessionId}`), /only session/);
 });
 
 test('shutdown stops the daemon', async () => {

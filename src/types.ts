@@ -54,6 +54,15 @@ export const INTENT_PRIORITY: Record<NoteIntent, number> = {
 export interface Note {
   id: string;
   state: 'new' | 'sent';
+  /**
+   * The human collapsed this note in their margin because they are done with
+   * it. Purely a reader-side view control (design §7.2): the agent can neither
+   * set nor see it, so it never becomes a channel for claiming a note was
+   * addressed — that claim is still only ever the next revision of the
+   * document. Dismissed notes stay in comments.json and in the approved
+   * record; nothing is deleted.
+   */
+  dismissed?: boolean;
   intent: NoteIntent;
   /** Optional proposed wording for the quoted text — input, never an edit;
    *  the agent decides whether to adopt it. */
@@ -105,12 +114,35 @@ export type WaitResult =
 
 export type AgentEvent = Exclude<WaitResult, { status: 'timeout' }>;
 
-export interface SessionInfo {
+/** The daemon process descriptor, written to .livedoc/daemon.json. */
+export interface DaemonInfo {
   pid: number;
   port: number;
   url: string;
-  file: string;
   startedAt: string;
+}
+
+/**
+ * @deprecated The daemon is no longer tied to a single plan file; use DaemonInfo.
+ * Kept for one release so a legacy .livedoc/session.json still parses.
+ */
+export type SessionInfo = DaemonInfo & { file?: string };
+
+/** One reviewable plan. Registry rows hold only what cannot be recomputed —
+ *  status, revision and title are live daemon state, served by /api/sessions. */
+export interface SessionRecord {
+  id: string;
+  /** Absolute path to the plan file. */
+  file: string;
+  /** Relative to the project root when inside it, else absolute — display + id input. */
+  relFile: string;
+  createdAt: string;
+  lastActiveAt: string;
+}
+
+export interface SessionsFile {
+  version: 1;
+  sessions: SessionRecord[];
 }
 
 /** The six-question hard cap from the design; `livedoc ask` rejects more. */

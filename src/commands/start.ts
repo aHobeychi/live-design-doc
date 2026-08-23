@@ -1,9 +1,16 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Store } from '../daemon/store.js';
-import { api, emit, fail, LIVEDOC_DIR, probe, readSession } from './api.js';
+import {
+  api,
+  emit,
+  fail,
+  livedocDir,
+  probe,
+  readDaemon,
+  writeCurrentSession,
+} from './api.js';
 
 function openBrowser(url: string): void {
   const cmd =
@@ -19,6 +26,7 @@ function openBrowser(url: string): void {
 interface BootLine {
   port: number;
   url: string;
+  session: string | null;
 }
 
 function spawnDaemon(file: string, dir: string): Promise<BootLine> {
@@ -63,36 +71,52 @@ export async function start(args: string[]): Promise<void> {
   const fileArg = args.find((a) => !a.startsWith('--'));
   if (!fileArg) fail('usage: livedoc start <plan.md> [--no-open]');
   const file = resolve(fileArg);
-  const dir = join(process.cwd(), LIVEDOC_DIR);
+  const dir = livedocDir();
 
-  // Idempotent start (design §12): a live session is reused and reloaded.
-  const existing = readSession();
+  // Idempotent start (design §12): a live daemon gains a session for this plan
+  // rather than replacing the one it already has. Other plans keep their notes,
+  // their revisions and any agent parked on them.
+  const existing = readDaemon();
   if (existing && (await probe(existing))) {
-    if (resolve(existing.file) !== file) {
+    const session = await api<{ id: string; created: boolean }>(
+      'POST',
+      '/api/sessions',
+      { file },
+      { daemonLevel: true }
+    );
+    if (!session.created && existsSync(file)) {
       try {
-        await fetch(`${existing.url}/api/shutdown`, { method: 'POST' });
+        await api('POST', '/api/reload', undefined, { session: session.id });
       } catch {
-        /* ignore shutdown errors; the daemon is stale anyway */
+        /* empty file: daemon stays in its current phase */
       }
-      const store = new Store(dir);
-      store.reset();
-      console.error(`livedoc: switching to ${fileArg} and clearing stale state from ${existing.file}`);
-    } else {
-      if (existsSync(file)) {
-        try {
-          await api('POST', '/api/reload');
-        } catch {
-          /* empty file: daemon stays in its current phase */
-        }
-      }
-      console.error(`livedoc: reusing session at ${existing.url}`);
-      emit({ status: 'ok', url: existing.url, port: existing.port, reused: true });
-      return;
     }
+    writeCurrentSession(session.id);
+    const url = `${existing.url}/?s=${session.id}`;
+    if (session.created && !noOpen) openBrowser(url);
+    console.error(`livedoc: ${session.created ? 'reviewing' : 'reusing'} ${fileArg} at ${url}`);
+    emit({
+      status: 'ok',
+      url: existing.url,
+      port: existing.port,
+      session: session.id,
+      reused: true,
+      created: session.created,
+    });
+    return;
   }
 
   const boot = await spawnDaemon(file, dir);
-  if (!noOpen) openBrowser(boot.url);
-  console.error(`livedoc: reviewing ${fileArg} at ${boot.url}`);
-  emit({ status: 'ok', url: boot.url, port: boot.port, reused: false });
+  const url = boot.session ? `${boot.url}/?s=${boot.session}` : boot.url;
+  if (boot.session) writeCurrentSession(boot.session);
+  if (!noOpen) openBrowser(url);
+  console.error(`livedoc: reviewing ${fileArg} at ${url}`);
+  emit({
+    status: 'ok',
+    url: boot.url,
+    port: boot.port,
+    session: boot.session,
+    reused: false,
+    created: true,
+  });
 }

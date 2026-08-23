@@ -413,9 +413,10 @@ portable core of the Agent Skills standard, with no tool-specific fields.
 2. **Should approval be per-section?** Approving a long plan is currently all-or-nothing.
    Per-section sign-off would let the agent start on settled parts while the rest is debated,
    at the cost of a much more complex state machine.
-3. **Should `comments.json` be per-plan rather than per-directory?** Today one `.livedoc`
-   directory accumulates notes across successive plans. Fine for a feature branch, messy for
-   a long-lived repository.
+3. ~~**Should `comments.json` be per-plan rather than per-directory?**~~ **Answered: yes.**
+   Notes now live in `.livedoc/sessions/<id>/comments.json`, one session per plan file, and
+   several plans can be under review at once. Starting a second plan no longer resets the
+   first — which the per-directory layout did.
 4. **Is the six-question cap the right number?** Guessed, not measured.
 
 ---

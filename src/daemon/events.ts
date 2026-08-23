@@ -2,6 +2,32 @@ import type { ServerResponse } from 'node:http';
 import type { AgentEvent, WaitResult } from '../types.js';
 
 /**
+ * Daemon-level SSE fan-out: everything that is about the *set* of sessions
+ * rather than one session's document. A browser tab registers on its session's
+ * Bus and on this Hub at once, so one EventSource carries both.
+ *
+ * Deliberately not a Bus: a daemon-wide `wait` would have no agent to serve.
+ */
+export class Hub {
+  private clients = new Set<ServerResponse>();
+
+  add(res: ServerResponse): void {
+    this.clients.add(res);
+    res.on('close', () => this.clients.delete(res));
+  }
+
+  broadcast(event: string, data: unknown = {}): void {
+    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const res of this.clients) res.write(frame);
+  }
+
+  close(): void {
+    for (const res of this.clients) res.end();
+    this.clients.clear();
+  }
+}
+
+/**
  * One in-process bus with two audiences:
  *  - SSE clients (browser tabs): broadcast, fire-and-forget.
  *  - The agent's single long-poll: wakeAgent either resolves the pending wait

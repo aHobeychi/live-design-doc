@@ -30,27 +30,64 @@ npm install && npm run build && npm link
 
 | Command | What it does |
 | --- | --- |
-| `livedoc start <plan.md>` | Start (or reattach to) the review daemon, open the browser |
+| `livedoc start <plan.md>` | Start (or reattach to) a session for this plan, open the browser |
+| `livedoc sessions` | List the open plans and their ids |
 | `livedoc ask <questions.json>` | Post clarifying questions — before the first draft only |
 | `livedoc wait [--timeout <sec>]` | Block until feedback / approval / answers, or the timeout sentinel |
 | `livedoc push` | Reload the plan file as a new revision (re-anchors all notes) |
 | `livedoc progress <block-id> [done]` | Tick off a block of the approved plan |
-| `livedoc stop` | Shut the daemon down |
+| `livedoc stop [--all]` | Close this session — `--all` shuts the daemon down |
 
 Every command prints one line of JSON on stdout; human-readable messages go to stderr.
 `wait` exits 0 on `{"status":"timeout"}` (loop again) and non-zero only when the daemon
 is unreachable (run `start` again).
 
+## Sessions
+
+Several plans can be under review at the same time — one session per plan file, all
+served by one daemon on one port. `livedoc start` on a second plan adds a session; it
+never disturbs the first one's notes, revisions, or an agent waiting on it. The
+**sessions** button at the top left of the browser lists every open plan and switches
+between them instantly.
+
+Each command targets a session by, in order: `--session <id>`, the `LIVEDOC_SESSION`
+environment variable, the session `livedoc start` last opened in this directory, or —
+when none of those apply — the daemon's most recently active one. `start` returns the
+id it opened:
+
+```bash
+livedoc start PLAN.md --no-open
+# → {"status":"ok","url":"http://127.0.0.1:4317","session":"plan-1d972b4a",...}
+
+export LIVEDOC_SESSION=plan-1d972b4a   # pin this terminal to that plan
+```
+
+An agent working a plan should pin it that way: the environment variable beats the
+shared `current` pointer, so a second agent starting its own plan in the same
+repository can never steal the first one's session.
+
+`livedoc stop` closes the current session and leaves the rest running; closing the last
+one stops the daemon too. Closing a session never deletes its files — `livedoc start`
+on the same plan picks it back up.
+
 ## Layout
 
 ```
 .livedoc/
-  comments.json              every note ever left (committed)
-  answers.json               clarify answers (committed)
-  approved-<timestamp>.md    the frozen contract (committed)
-  revisions/NNN.md           every pushed draft (ignored)
-  session.json               pid, port, url (ignored)
+  sessions.json                        the open plans (committed)
+  sessions/<id>/
+    comments.json                      every note ever left (committed)
+    answers.json                       clarify answers (committed)
+    approved-<timestamp>.md            the frozen contract (committed)
+    revisions/NNN.md                   every pushed draft (ignored)
+    pending.json                       undelivered agent events (ignored)
+  daemon.json                          pid, port, url (ignored)
+  current                              the session this directory is on (ignored)
 ```
+
+A session id is `<plan-slug>-<hash>`, derived from the plan's path — so it is stable
+across restarts and identical in a fresh clone. A pre-existing flat `.livedoc/` is
+migrated into `sessions/<id>/` automatically on the next `livedoc start`.
 
 ## Development
 

@@ -1,7 +1,31 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Bus } from '../src/daemon/events.js';
+import { EventEmitter } from 'node:events';
+import type { ServerResponse } from 'node:http';
+import { Bus, Hub } from '../src/daemon/events.js';
 import type { AgentEvent } from '../src/types.js';
+
+interface FakeRes {
+  frames: string[];
+  ended: boolean;
+}
+
+/** Just enough of a ServerResponse for the SSE fan-out paths. */
+function fakeRes(): ServerResponse & FakeRes {
+  const res = Object.assign(new EventEmitter(), {
+    frames: [] as string[],
+    ended: false,
+    write(chunk: string) {
+      res.frames.push(chunk);
+      return true;
+    },
+    end() {
+      res.ended = true;
+      return res;
+    },
+  });
+  return res as unknown as ServerResponse & FakeRes;
+}
 
 const APPROVED: AgentEvent = { status: 'approved', approvedPath: '/x.md' };
 const SHUTDOWN: AgentEvent = { status: 'shutdown' };
@@ -84,5 +108,90 @@ test('seedPending restores a persisted queue without re-notifying', async () => 
   bus.seedPending([APPROVED]);
   assert.deepEqual(sizes, []);
   assert.deepEqual(await bus.wait(5), APPROVED);
+  bus.close();
+});
+
+// ---- per-session isolation: one Bus per session, never shared ---------------
+
+test('waking one session does not resolve another session parked in wait', async () => {
+  const a = new Bus();
+  const b = new Bus();
+  const parked = b.wait(1);
+  a.wakeAgent(APPROVED);
+  // b's agent stays parked and times out; only a's is woken.
+  assert.deepEqual(await parked, { status: 'timeout' });
+  assert.deepEqual(await a.wait(5), APPROVED);
+  a.close();
+  b.close();
+});
+
+test('pending queues persist per session — one Store never sees another’s events', async () => {
+  const a = new Bus();
+  const b = new Bus();
+  const aSaved: AgentEvent[][] = [];
+  const bSaved: AgentEvent[][] = [];
+  a.onPendingChange = (p) => aSaved.push([...p]);
+  b.onPendingChange = (p) => bSaved.push([...p]);
+
+  a.wakeAgent(APPROVED);
+  assert.deepEqual(aSaved, [[APPROVED]]);
+  assert.deepEqual(bSaved, [], 'b must not observe a’s event');
+
+  b.wakeAgent(SHUTDOWN);
+  assert.deepEqual(await a.wait(5), APPROVED);
+  assert.deepEqual(await b.wait(5), SHUTDOWN);
+  a.close();
+  b.close();
+});
+
+test('an SSE broadcast reaches only the session that fired it', () => {
+  const a = new Bus();
+  const b = new Bus();
+  const ra = fakeRes();
+  const rb = fakeRes();
+  a.addClient(ra);
+  b.addClient(rb);
+  a.broadcast('revision', { revision: 2 });
+  assert.equal(ra.frames.length, 1);
+  assert.match(ra.frames[0], /event: revision\ndata: {"revision":2}\n\n/);
+  assert.deepEqual(rb.frames, []);
+  a.close();
+  b.close();
+});
+
+// ---- Hub: the daemon-level fan-out for session-list changes -----------------
+
+test('Hub broadcasts to every tab regardless of the session it is viewing', () => {
+  const hub = new Hub();
+  const one = fakeRes();
+  const two = fakeRes();
+  hub.add(one);
+  hub.add(two);
+  hub.broadcast('sessions', { id: 'plan-1' });
+  for (const res of [one, two]) {
+    assert.match(res.frames[0], /event: sessions\ndata: {"id":"plan-1"}\n\n/);
+  }
+  hub.close();
+  assert.ok(one.ended && two.ended);
+});
+
+test('Hub drops a client when its response closes', () => {
+  const hub = new Hub();
+  const res = fakeRes();
+  hub.add(res);
+  res.emit('close');
+  hub.broadcast('sessions');
+  assert.deepEqual(res.frames, [], 'a closed client must not be written to');
+});
+
+test('one response registered on both a Bus and the Hub receives both streams', () => {
+  const bus = new Bus();
+  const hub = new Hub();
+  const res = fakeRes();
+  bus.addClient(res);
+  hub.add(res);
+  bus.broadcast('status', { status: 'review' });
+  hub.broadcast('sessions');
+  assert.equal(res.frames.length, 2);
   bus.close();
 });

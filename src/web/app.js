@@ -1,7 +1,26 @@
 import { layoutMargin } from './margin.js';
 
 const $ = (s) => document.querySelector(s);
+
+let currentSession = new URLSearchParams(location.search).get('s');
+let sessions = [];
+
+/** Address the session being viewed: /api/foo -> /api/s/<id>/foo. */
+const sPath = (path) =>
+  currentSession && path.startsWith('/api/') ? `/api/s/${currentSession}${path.slice(4)}` : path;
+
 const api = async (method, path, body) => {
+  const res = await fetch(sPath(path), {
+    method,
+    ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+};
+
+/** Daemon-level calls are about the set of sessions, so never session-prefixed. */
+const daemonApi = async (method, path, body) => {
   const res = await fetch(path, {
     method,
     ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}),
@@ -445,11 +464,132 @@ function highlight(blockId, on) {
   if (el) el.classList.toggle('note-target', on);
 }
 
+// ---- sessions ---------------------------------------------------------------
+
+async function loadSessions() {
+  const data = await daemonApi('GET', '/api/sessions').catch(() => null);
+  if (!data) return;
+  sessions = data.sessions;
+  currentSession ??= data.default;
+  // A session closed from another terminal leaves this tab pointing at nothing.
+  if (currentSession && !sessions.some((s) => s.id === currentSession)) {
+    toast('This plan was closed', 'error');
+    return switchSession(data.default);
+  }
+  renderSessions();
+}
+
+let sessionsTimer = null;
+function scheduleSessions() {
+  clearTimeout(sessionsTimer);
+  sessionsTimer = setTimeout(() => loadSessions().catch(() => {}), 80);
+}
+
+function renderSessions() {
+  const panel = $('#sessions-panel');
+  panel.innerHTML = '';
+  for (const s of sessions) {
+    const b = document.createElement('button');
+    b.className = 'sess-row';
+    b.setAttribute('role', 'option');
+    b.setAttribute('aria-selected', String(s.id === currentSession));
+    if (s.attention) b.dataset.attention = 'true';
+
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = s.title || s.name;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    const bits = [s.status];
+    if (s.revision > 0) bits.push(`rev ${String(s.revision).padStart(3, '0')}`);
+    if (s.unsentNotes) bits.push(`${s.unsentNotes} unsent`);
+    meta.append(dot, document.createTextNode(bits.join(' · ')));
+    b.append(name, meta);
+
+    // Only worth a third line when it says something the name does not.
+    if (s.missing || s.relFile !== s.name) {
+      const sub = document.createElement('div');
+      sub.className = s.missing ? 'sub missing' : 'sub';
+      sub.textContent = s.missing ? 'plan file missing' : s.relFile;
+      b.append(sub);
+    }
+
+    b.onclick = () => switchSession(s.id);
+    panel.appendChild(b);
+  }
+  // The badge is the point of the attention dot: visible without opening up.
+  const waiting = sessions.filter((s) => s.attention && s.id !== currentSession).length;
+  const btn = $('#sessions-btn');
+  btn.textContent = waiting ? `sessions (${waiting})` : 'sessions';
+  btn.dataset.attention = String(waiting > 0);
+}
+
+async function switchSession(id) {
+  if (!id || id === currentSession) return void closePanels();
+  const composerOpen = !$('#composer').hidden && $('#composer-text').value.trim();
+  if (composerOpen) {
+    const ok = await confirmDialog({
+      title: 'Discard this note?',
+      body: 'You have an unsaved note on this plan. Switching will discard it.',
+      okLabel: 'Discard',
+    });
+    if (!ok) return;
+  }
+
+  currentSession = id;
+  historyView = null;
+  document.body.classList.remove('history-mode');
+  prevText = new Map(); // no change-flashes carried across plans
+  lastDocHtml = null; // renderDoc skips identical HTML, so this must be cleared
+  snap = null;
+  pendingSelection = null;
+  $('#composer').hidden = true;
+  $('#addnote').hidden = true;
+  $('#banner').hidden = true;
+  $('#doc').innerHTML = '';
+  $('#toc').innerHTML = '';
+  $('#notes').innerHTML = '';
+  window.scrollTo(0, 0);
+  // replaceState, not pushState: Back should still mean "leave livedoc".
+  history.replaceState(null, '', `?s=${id}`);
+
+  closePanels();
+  reopenEvents();
+  await load().catch(oops);
+  renderSessions();
+}
+
+function closePanels() {
+  $('#sessions-panel').hidden = true;
+  $('#history-panel').hidden = true;
+  $('#sessions-btn').setAttribute('aria-expanded', 'false');
+}
+
+$('#sessions-btn').onclick = async () => {
+  const panel = $('#sessions-panel');
+  if (!panel.hidden) return void closePanels();
+  await loadSessions().catch(() => {});
+  $('#history-panel').hidden = true;
+  panel.hidden = false;
+  $('#sessions-btn').setAttribute('aria-expanded', 'true');
+};
+
+// Neither panel used to close on an outside click. pointerdown rather than
+// click so this never races the pointerup that drives text selection.
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('#sessions-panel, #sessions-btn, #history-panel, #history-btn')) return;
+  closePanels();
+});
+
 // ---- history ----------------------------------------------------------------
 
 $('#history-btn').onclick = async () => {
   const panel = $('#history-panel');
   if (!panel.hidden) return void (panel.hidden = true);
+  closePanels();
   const { revisions } = await api('GET', '/api/history').catch(() => ({ revisions: [] }));
   panel.innerHTML = '';
   for (const r of [...revisions].reverse()) {
@@ -577,6 +717,8 @@ document.getElementById('addnote').addEventListener('mousedown', (e) => e.preven
 document.addEventListener('dblclick', () => setTimeout(maybeShowAddNote, 1));
 document.addEventListener('keyup', (e) => {
   if (e.key === 'Escape') {
+    // Topmost thing first: a panel over the document, then the composer.
+    if (!$('#sessions-panel').hidden || !$('#history-panel').hidden) return closePanels();
     $('#composer').hidden = true;
     $('#addnote').hidden = true;
   }
@@ -749,15 +891,40 @@ $('#approve').onclick = async () => {
 
 // ---- live updates -----------------------------------------------------------
 
-const es = new EventSource('/api/events');
-for (const ev of ['revision', 'note', 'status', 'progress', 'questions']) {
-  es.addEventListener(ev, scheduleLoad);
+let es = null;
+
+/**
+ * The stream is per-session, so switching must tear it down: a stale one would
+ * deliver the old session's events while the new document is on screen. The
+ * daemon registers each stream on the session's Bus and on its Hub, so
+ * session-list changes ride the same connection.
+ */
+function reopenEvents() {
+  es?.close();
+  es = new EventSource(sPath('/api/events'));
+  for (const ev of ['revision', 'note', 'status', 'progress', 'questions']) {
+    es.addEventListener(ev, scheduleLoad);
+  }
+  es.addEventListener('sessions', scheduleSessions);
+  es.onopen = scheduleLoad;
 }
-es.onopen = scheduleLoad;
 
 window.addEventListener('resize', () => requestAnimationFrame(layoutMargin));
 
-load().catch((e) => {
+async function boot() {
+  await loadSessions();
+  // An unknown ?s= (a closed session, a stale bookmark) falls back to the
+  // daemon's default rather than leaving every request 404ing.
+  if (currentSession && !sessions.some((s) => s.id === currentSession)) {
+    currentSession = null;
+    history.replaceState(null, '', location.pathname);
+    await loadSessions();
+  }
+  reopenEvents();
+  await load();
+}
+
+boot().catch((e) => {
   $('#waiting').hidden = false;
   $('#waiting').textContent = 'Cannot reach the livedoc daemon: ' + e.message;
 });

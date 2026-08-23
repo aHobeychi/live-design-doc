@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import type { AgentEvent, Answer, Note, Question, SessionInfo } from '../types.js';
 
 /** JSON.stringify with recursively sorted keys — committed files diff minimally. */
-function stableStringify(value: unknown): string {
+export function stableStringify(value: unknown): string {
   const sort = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(sort);
     if (v !== null && typeof v === 'object') {
